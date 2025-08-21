@@ -34,6 +34,25 @@ else
     echo "⚠️  kubectl not found (optional for local development)"
 fi
 
+# 设置 Python 环境 (用于 MLflow)
+echo "🐍 Setting up Python environment for MLflow..."
+if ! command -v uv &> /dev/null; then
+    echo "📦 Installing uv (Python package manager)..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
+fi
+
+# 创建项目内的 Python 虚拟环境
+if [ ! -d ".venv" ]; then
+    echo "🔧 Creating Python virtual environment in project..."
+    uv venv .venv --python 3.11
+    source .venv/bin/activate
+    uv pip install -r requirements.txt
+    echo "✅ Python environment created at ./.venv"
+else
+    echo "✅ Python environment already exists at ./.venv"
+fi
+
 # 安装项目依赖
 echo "📦 Installing project dependencies..."
 npm install
@@ -59,7 +78,7 @@ fi
 echo ""
 echo "🎉 Setup completed successfully!"
 echo ""
-echo "🚀 To start the application:"
+echo "🚀 To start the application (will auto-activate Python env):"
 echo "   ./start.sh"
 echo ""
 echo "📊 Dashboard will be available at: http://localhost:3000"

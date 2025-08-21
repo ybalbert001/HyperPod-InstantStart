@@ -1640,7 +1640,7 @@ except Exception as e:
     
     fs.writeFileSync(tempScriptPath, testScript);
     
-    const pythonPath = '/home/ubuntu/uvenv/py312/bin/python';
+    const pythonPath = path.join(__dirname, '../.venv/bin/python');
     const pythonProcess = spawn(pythonPath, [tempScriptPath], {
       cwd: __dirname,
       env: { ...process.env }
@@ -1716,8 +1716,8 @@ app.get('/api/training-history', async (req, res) => {
     const { spawn } = require('child_process');
     const path = require('path');
     
-    // 使用虚拟环境的Python执行脚本，传递配置参数
-    const pythonPath = '/home/ubuntu/uvenv/py312/bin/python';
+    // 使用项目内虚拟环境的Python执行脚本，传递配置参数
+    const pythonPath = path.join(__dirname, '../.venv/bin/python');
     const scriptPath = path.join(__dirname, '../mlflow/get_training_history.py');
     
     const pythonProcess = spawn(pythonPath, [scriptPath, mlflowConfig.tracking_uri], {

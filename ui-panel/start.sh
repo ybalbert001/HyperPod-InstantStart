@@ -32,6 +32,23 @@ fi
 
 echo "✅ kubectl connection successful"
 
+# 激活 Python 环境 (用于 MLflow)
+echo "🐍 Activating Python environment..."
+if [ -d ".venv" ]; then
+    source .venv/bin/activate
+    echo "✅ Python environment activated: $(python --version)"
+    
+    # 验证 MLflow 可用性
+    if python -c "import mlflow" 2>/dev/null; then
+        echo "✅ MLflow available: $(python -c 'import mlflow; print(mlflow.__version__)')"
+    else
+        echo "⚠️  MLflow not available, Training History may not work"
+    fi
+else
+    echo "⚠️  Python environment not found. Run ./setup.sh first"
+    echo "   Training History features will not work without Python environment"
+fi
+
 # 清理可能占用端口的进程
 echo "🧹 Cleaning up existing processes..."
 
