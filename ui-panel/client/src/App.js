@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Layout, Row, Col, Card, message, Tabs, Space, Badge, Button } from 'antd';
-import { ContainerOutlined, ApiOutlined, ReloadOutlined, RocketOutlined, ExperimentOutlined, DatabaseOutlined, CloudServerOutlined } from '@ant-design/icons';
+import { ContainerOutlined, ApiOutlined, ReloadOutlined, RocketOutlined, ExperimentOutlined, DatabaseOutlined, CloudServerOutlined, SettingOutlined } from '@ant-design/icons';
 import ThemeProvider from './components/ThemeProvider';
 import ConfigPanel from './components/ConfigPanel';
 import ClusterStatusV2 from './components/ClusterStatusV2';
@@ -14,6 +14,7 @@ import TrainingHistoryPanel from './components/TrainingHistoryPanel';
 import ModelDownloadPanel from './components/ModelDownloadPanel';
 import S3StoragePanel from './components/S3StoragePanel';
 import HyperPodJobManager from './components/HyperPodJobManager';
+import ClusterManagement from './components/ClusterManagement';
 import { refreshManager } from './hooks/useAutoRefresh';
 import { getActiveTheme } from './config/themeConfig';
 import './App.css';
@@ -367,6 +368,15 @@ function App() {
             size="large"
             items={[
               {
+                key: 'cluster-management',
+                label: (
+                  <Space>
+                    <SettingOutlined />
+                    Cluster Management
+                  </Space>
+                ),
+              },
+              {
                 key: 'model-management',
                 label: (
                   <Space>
@@ -408,6 +418,11 @@ function App() {
         
         {/* 中间动态内容区域 */}
         <div style={{ marginBottom: '16px' }}>
+          {/* Cluster Management */}
+          <div style={{ display: activeMainTab === 'cluster-management' ? 'block' : 'none' }}>
+            <ClusterManagement />
+          </div>
+
           <Row gutter={[16, 16]} style={{ display: activeMainTab === 'inference' ? 'flex' : 'none' }}>
             {/* Inference - 左侧：模型配置 */}
             <Col xs={24} lg={12}>

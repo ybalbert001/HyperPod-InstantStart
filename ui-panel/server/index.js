@@ -2764,6 +2764,800 @@ app.get('/api/s3-storage', async (req, res) => {
   }
 });
 
+// ==================== 集群管理 API ====================
+
+// 保存集群配置到 init_envs 文件
+app.post('/api/cluster/save-config', async (req, res) => {
+  try {
+    const config = req.body;
+    console.log('Saving cluster configuration:', config);
+
+    // 构建环境变量内容
+    const envContent = `export CLOUD_FORMATION_FULL_STACK_NAME=${config.cloudFormationFullStackName}
+export AWS_REGION=${config.awsRegion}
+export EKS_CLUSTER_NAME=${config.eksClusterName}
+export HP_CLUSTER_NAME=${config.hpClusterName}
+${config.enableFtp && config.ftpName ? `export FTP_NAME=${config.ftpName}` : '# export FTP_NAME=your-ftp-name'}
+export GPU_CAPACITY_AZ=${config.gpuCapacityAz}
+export GPU_INSTANCE_TYPE=${config.gpuInstanceType}
+export GPU_INSTANCE_COUNT=${config.gpuInstanceCount}
+export DEPLOY_MODEL_S3_BUCKET=${config.deployModelS3Bucket}
+
+# Automatic fill
+export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+export STACK_ID=$CLOUD_FORMATION_FULL_STACK_NAME
+export AWS_AZ=$(aws ec2 describe-availability-zones --region $AWS_REGION --query "AvailabilityZones[?ZoneName=='$GPU_CAPACITY_AZ'].ZoneId" --output text)`;
+
+    const initEnvsPath = path.join(__dirname, '../../cli/init_envs');
+    
+    // 备份原文件
+    if (fs.existsSync(initEnvsPath)) {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const backupPath = `${initEnvsPath}.backup.${timestamp}`;
+      await fs.copy(initEnvsPath, backupPath);
+      console.log(`Backed up original init_envs to: ${backupPath}`);
+    }
+
+    // 写入新配置
+    await fs.writeFile(initEnvsPath, envContent);
+    console.log('Configuration saved successfully');
+
+    res.json({
+      success: true,
+      message: 'Configuration saved successfully',
+      backupCreated: true
+    });
+
+  } catch (error) {
+    console.error('Error saving cluster configuration:', error);
+    res.json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// 执行集群启动脚本 (Step 1)
+app.post('/api/cluster/launch', async (req, res) => {
+  try {
+    console.log('Launching cluster (Step 1)...');
+    
+    const cliPath = path.join(__dirname, '../../cli');
+    const scriptPath = path.join(cliPath, '1-cluster-launch.sh');
+    
+    // 检查脚本是否存在
+    if (!fs.existsSync(scriptPath)) {
+      throw new Error(`Script not found: ${scriptPath}`);
+    }
+
+    // 执行脚本，自动回答 'y' 来跳过确认
+    const command = `cd "${cliPath}" && echo 'y' | bash 1-cluster-launch.sh`;
+    
+    exec(command, { 
+      timeout: 300000, // 5分钟超时
+      maxBuffer: 1024 * 1024 * 10 // 10MB buffer
+    }, (error, stdout, stderr) => {
+      if (error) {
+        console.error('Cluster launch error:', error);
+        return res.json({
+          success: false,
+          error: error.message,
+          stdout: stdout,
+          stderr: stderr
+        });
+      }
+
+      console.log('Cluster launch completed successfully');
+      res.json({
+        success: true,
+        message: 'Cluster launch completed successfully',
+        stdout: stdout,
+        stderr: stderr
+      });
+    });
+
+  } catch (error) {
+    console.error('Error launching cluster:', error);
+    res.json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// 执行集群配置脚本 (Step 2)
+app.post('/api/cluster/configure', async (req, res) => {
+  try {
+    console.log('Configuring cluster (Step 2)...');
+    
+    const cliPath = path.join(__dirname, '../../cli');
+    const scriptPath = path.join(cliPath, '2-cluster-configs.sh');
+    
+    // 检查脚本是否存在
+    if (!fs.existsSync(scriptPath)) {
+      throw new Error(`Script not found: ${scriptPath}`);
+    }
+
+    // 执行脚本
+    const command = `cd "${cliPath}" && bash 2-cluster-configs.sh`;
+    
+    exec(command, { 
+      timeout: 600000, // 10分钟超时
+      maxBuffer: 1024 * 1024 * 10 // 10MB buffer
+    }, (error, stdout, stderr) => {
+      if (error) {
+        console.error('Cluster configuration error:', error);
+        return res.json({
+          success: false,
+          error: error.message,
+          stdout: stdout,
+          stderr: stderr
+        });
+      }
+
+      console.log('Cluster configuration completed successfully');
+      res.json({
+        success: true,
+        message: 'Cluster configuration completed successfully',
+        stdout: stdout,
+        stderr: stderr
+      });
+    });
+
+  } catch (error) {
+    console.error('Error configuring cluster:', error);
+    res.json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// 获取 CloudFormation 堆栈状态
+app.get('/api/cluster/cloudformation-status', async (req, res) => {
+  try {
+    const { stackName } = req.query;
+    
+    if (!stackName) {
+      return res.json({
+        success: false,
+        error: 'Stack name is required'
+      });
+    }
+
+    console.log(`Getting CloudFormation status for stack: ${stackName}`);
+    
+    const command = `aws cloudformation describe-stacks --stack-name "${stackName}" --output json`;
+    
+    exec(command, { timeout: 30000 }, (error, stdout, stderr) => {
+      if (error) {
+        console.error('CloudFormation status error:', error);
+        
+        // 检查是否是堆栈不存在的错误
+        if (stderr.includes('does not exist')) {
+          return res.json({
+            success: true,
+            data: {
+              StackStatus: 'STACK_NOT_EXISTS',
+              StackName: stackName
+            }
+          });
+        }
+        
+        return res.json({
+          success: false,
+          error: error.message,
+          stderr: stderr
+        });
+      }
+
+      try {
+        const result = JSON.parse(stdout);
+        if (result.Stacks && result.Stacks.length > 0) {
+          const stack = result.Stacks[0];
+          res.json({
+            success: true,
+            data: {
+              StackName: stack.StackName,
+              StackStatus: stack.StackStatus,
+              CreationTime: stack.CreationTime,
+              LastUpdatedTime: stack.LastUpdatedTime,
+              StackStatusReason: stack.StackStatusReason
+            }
+          });
+        } else {
+          res.json({
+            success: false,
+            error: 'Stack not found'
+          });
+        }
+      } catch (parseError) {
+        console.error('Error parsing CloudFormation response:', parseError);
+        res.json({
+          success: false,
+          error: 'Failed to parse CloudFormation response'
+        });
+      }
+    });
+
+  } catch (error) {
+    console.error('Error getting CloudFormation status:', error);
+    res.json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ==================== 集群管理 API ====================
+
+// 日志管理类
+class ClusterLogManager {
+  constructor() {
+    this.baseDir = path.join(__dirname, '../tmp/cluster-management');
+    this.logsDir = path.join(this.baseDir, 'logs');
+    this.currentDir = path.join(this.baseDir, 'current');
+    this.metadataDir = path.join(this.baseDir, 'metadata');
+    
+    // 确保目录存在
+    [this.baseDir, this.logsDir, this.currentDir, this.metadataDir].forEach(dir => {
+      fs.ensureDirSync(dir);
+    });
+  }
+
+  createLogFile(step) {
+    const timestamp = new Date().toISOString()
+      .replace(/:/g, '-')
+      .replace(/\..+/, '')
+      .replace('T', '_');
+    
+    const logFileName = `${timestamp}_${step}.log`;
+    const logFilePath = path.join(this.logsDir, logFileName);
+    const currentLinkPath = path.join(this.currentDir, `${step}.log`);
+    
+    // 创建日志文件
+    fs.writeFileSync(logFilePath, '');
+    
+    // 创建/更新软链接
+    if (fs.existsSync(currentLinkPath)) {
+      fs.unlinkSync(currentLinkPath);
+    }
+    fs.symlinkSync(path.relative(this.currentDir, logFilePath), currentLinkPath);
+    
+    return {
+      logFilePath,
+      logId: path.basename(logFileName, '.log')
+    };
+  }
+
+  getCurrentLogContent(step) {
+    const currentLogPath = path.join(this.currentDir, `${step}.log`);
+    if (fs.existsSync(currentLogPath)) {
+      return fs.readFileSync(currentLogPath, 'utf8');
+    }
+    return '';
+  }
+
+  updateStatus(step, status) {
+    const statusFile = path.join(this.metadataDir, `${step}_status.json`);
+    const statusData = {
+      step,
+      status,
+      timestamp: new Date().toISOString(),
+      logId: this.getCurrentLogId(step)
+    };
+    fs.writeFileSync(statusFile, JSON.stringify(statusData, null, 2));
+  }
+
+  getCurrentLogId(step) {
+    const currentLogPath = path.join(this.currentDir, `${step}.log`);
+    if (fs.existsSync(currentLogPath)) {
+      const realPath = fs.readlinkSync(currentLogPath);
+      return path.basename(realPath, '.log');
+    }
+    return null;
+  }
+}
+
+const logManager = new ClusterLogManager();
+
+// 检查 Step 1 状态的函数 - 基于 CloudFormation
+async function checkStep1Status() {
+  try {
+    // 从 init_envs 读取 CloudFormation 堆栈名称
+    const initEnvsPath = path.join(__dirname, '../../cli/init_envs');
+    const envContent = fs.readFileSync(initEnvsPath, 'utf8');
+    
+    // 解析 CLOUD_FORMATION_FULL_STACK_NAME
+    const stackNameMatch = envContent.match(/export CLOUD_FORMATION_FULL_STACK_NAME=(.+)/);
+    if (!stackNameMatch) {
+      return { status: 'unknown', error: 'Stack name not found in init_envs' };
+    }
+    
+    const stackName = stackNameMatch[1].trim();
+    
+    // 查询 CloudFormation 状态
+    const command = `aws cloudformation describe-stacks --stack-name "${stackName}" --output json`;
+    
+    return new Promise((resolve) => {
+      exec(command, { timeout: 30000 }, (error, stdout, stderr) => {
+        if (error) {
+          if (stderr.includes('does not exist')) {
+            resolve({ status: 'not_started', stackName });
+          } else {
+            resolve({ status: 'error', error: error.message, stackName });
+          }
+          return;
+        }
+
+        try {
+          const result = JSON.parse(stdout);
+          if (result.Stacks && result.Stacks.length > 0) {
+            const stack = result.Stacks[0];
+            const cfStatus = stack.StackStatus;
+            
+            let status;
+            if (cfStatus === 'CREATE_COMPLETE' || cfStatus === 'UPDATE_COMPLETE') {
+              status = 'completed';
+            } else if (cfStatus.includes('IN_PROGRESS')) {
+              status = 'running';
+            } else if (cfStatus.includes('FAILED')) {
+              status = 'failed';
+            } else {
+              status = 'unknown';
+            }
+            
+            resolve({
+              status,
+              stackName,
+              cloudFormationStatus: cfStatus,
+              lastUpdated: stack.LastUpdatedTime || stack.CreationTime
+            });
+          } else {
+            resolve({ status: 'not_found', stackName });
+          }
+        } catch (parseError) {
+          resolve({ status: 'error', error: 'Failed to parse CloudFormation response', stackName });
+        }
+      });
+    });
+
+  } catch (error) {
+    return { status: 'error', error: error.message };
+  }
+}
+
+// 检查 Step 2 状态的函数 - 基于 Kubernetes 资源
+async function checkStep2Status() {
+  try {
+    const checks = [];
+    
+    // 检查 1: S3 CSI PersistentVolume
+    const checkS3PV = new Promise((resolve) => {
+      exec('kubectl get pv s3-pv -o json', { timeout: 10000 }, (error, stdout) => {
+        if (error) {
+          resolve({ name: 's3-pv', status: 'missing', error: error.message });
+        } else {
+          try {
+            const pv = JSON.parse(stdout);
+            resolve({
+              name: 's3-pv',
+              status: pv.status?.phase === 'Available' ? 'ready' : 'not_ready',
+              phase: pv.status?.phase
+            });
+          } catch (parseError) {
+            resolve({ name: 's3-pv', status: 'error', error: 'Failed to parse PV data' });
+          }
+        }
+      });
+    });
+
+    // 检查 2: HyperPod Training Operator Pod
+    const checkHPOperator = new Promise((resolve) => {
+      exec('kubectl get pods -A -l app.kubernetes.io/name=hp-training-operator -o json', { timeout: 10000 }, (error, stdout) => {
+        if (error) {
+          resolve({ name: 'hp-training-operator', status: 'missing', error: error.message });
+        } else {
+          try {
+            const result = JSON.parse(stdout);
+            const pods = result.items || [];
+            
+            if (pods.length === 0) {
+              resolve({ name: 'hp-training-operator', status: 'missing' });
+            } else {
+              const runningPods = pods.filter(pod => pod.status?.phase === 'Running');
+              resolve({
+                name: 'hp-training-operator',
+                status: runningPods.length > 0 ? 'ready' : 'not_ready',
+                totalPods: pods.length,
+                runningPods: runningPods.length,
+                pods: pods.map(pod => ({
+                  name: pod.metadata?.name,
+                  namespace: pod.metadata?.namespace,
+                  phase: pod.status?.phase
+                }))
+              });
+            }
+          } catch (parseError) {
+            resolve({ name: 'hp-training-operator', status: 'error', error: 'Failed to parse pods data' });
+          }
+        }
+      });
+    });
+
+    // 检查 3: 特定的 controller manager pod
+    const checkControllerManager = new Promise((resolve) => {
+      exec('kubectl get pods -A -o name | grep -E "hp-training-controller-manager|training-operator"', { timeout: 10000 }, (error, stdout) => {
+        if (error || !stdout.trim()) {
+          resolve({ name: 'controller-manager', status: 'missing' });
+        } else {
+          const pods = stdout.trim().split('\n').filter(line => line.trim());
+          resolve({ 
+            name: 'controller-manager', 
+            status: pods.length > 0 ? 'ready' : 'missing',
+            pods: pods
+          });
+        }
+      });
+    });
+
+    // 等待所有检查完成
+    const results = await Promise.all([checkS3PV, checkHPOperator, checkControllerManager]);
+    
+    // 判断整体状态
+    const readyCount = results.filter(result => result.status === 'ready').length;
+    const missingCount = results.filter(result => result.status === 'missing').length;
+    const errorCount = results.filter(result => result.status === 'error').length;
+
+    let overallStatus;
+    if (readyCount === results.length) {
+      overallStatus = 'completed';
+    } else if (errorCount > 0) {
+      overallStatus = 'error';
+    } else if (missingCount === results.length) {
+      overallStatus = 'not_started';
+    } else {
+      overallStatus = 'partial'; // 部分组件就绪
+    }
+
+    return {
+      status: overallStatus,
+      checks: results,
+      summary: {
+        total: results.length,
+        ready: readyCount,
+        missing: missingCount,
+        error: errorCount
+      }
+    };
+
+  } catch (error) {
+    return { status: 'error', error: error.message };
+  }
+}
+
+// 保存集群配置到 init_envs 文件
+app.post('/api/cluster/save-config', async (req, res) => {
+  try {
+    const config = req.body;
+    console.log('Saving cluster configuration:', config);
+
+    // 构建环境变量内容
+    const envContent = `export CLOUD_FORMATION_FULL_STACK_NAME=${config.cloudFormationFullStackName}
+export AWS_REGION=${config.awsRegion}
+export EKS_CLUSTER_NAME=${config.eksClusterName}
+export HP_CLUSTER_NAME=${config.hpClusterName}
+${config.enableFtp && config.ftpName ? `export FTP_NAME=${config.ftpName}` : '# export FTP_NAME=your-ftp-name'}
+export GPU_CAPACITY_AZ=${config.gpuCapacityAz}
+export GPU_INSTANCE_TYPE=${config.gpuInstanceType}
+export GPU_INSTANCE_COUNT=${config.gpuInstanceCount}
+export DEPLOY_MODEL_S3_BUCKET=${config.deployModelS3Bucket}
+
+# Automatic fill
+export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+export STACK_ID=$CLOUD_FORMATION_FULL_STACK_NAME
+export AWS_AZ=$(aws ec2 describe-availability-zones --region $AWS_REGION --query "AvailabilityZones[?ZoneName=='$GPU_CAPACITY_AZ'].ZoneId" --output text)`;
+
+    const initEnvsPath = path.join(__dirname, '../../cli/init_envs');
+    
+    // 备份原文件
+    if (fs.existsSync(initEnvsPath)) {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const backupPath = `${initEnvsPath}.backup.${timestamp}`;
+      await fs.copy(initEnvsPath, backupPath);
+      console.log(`Backed up original init_envs to: ${backupPath}`);
+    }
+
+    // 写入新配置
+    await fs.writeFile(initEnvsPath, envContent);
+    console.log('Configuration saved successfully');
+
+    res.json({
+      success: true,
+      message: 'Configuration saved successfully',
+      backupCreated: true
+    });
+
+  } catch (error) {
+    console.error('Error saving cluster configuration:', error);
+    res.json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// 执行集群启动脚本 (Step 1) - 使用 nohup 后台执行
+app.post('/api/cluster/launch', async (req, res) => {
+  try {
+    console.log('Launching cluster (Step 1) in background...');
+    
+    const cliPath = path.join(__dirname, '../../cli');
+    const scriptPath = path.join(cliPath, '1-cluster-launch.sh');
+    
+    // 检查脚本是否存在
+    if (!fs.existsSync(scriptPath)) {
+      throw new Error(`Script not found: ${scriptPath}`);
+    }
+
+    // 创建日志文件
+    const { logFilePath, logId } = logManager.createLogFile('launch');
+    
+    // 使用 nohup 后台执行，输出重定向到日志文件
+    const command = `cd "${cliPath}" && nohup bash -c 'echo "y" | bash 1-cluster-launch.sh' > "${logFilePath}" 2>&1 &`;
+    
+    exec(command, (error) => {
+      if (error) {
+        console.error('Failed to start script:', error);
+        logManager.updateStatus('launch', 'failed');
+      }
+    });
+    
+    // 立即返回，不等待脚本完成
+    logManager.updateStatus('launch', 'started');
+    
+    res.json({
+      success: true,
+      message: 'Cluster launch started in background',
+      logId: logId,
+      status: 'started'
+    });
+
+  } catch (error) {
+    console.error('Error launching cluster:', error);
+    res.json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// 执行集群配置脚本 (Step 2) - 使用 nohup 后台执行
+app.post('/api/cluster/configure', async (req, res) => {
+  try {
+    console.log('Configuring cluster (Step 2) in background...');
+    
+    const cliPath = path.join(__dirname, '../../cli');
+    const scriptPath = path.join(cliPath, '2-cluster-configs.sh');
+    
+    // 检查脚本是否存在
+    if (!fs.existsSync(scriptPath)) {
+      throw new Error(`Script not found: ${scriptPath}`);
+    }
+
+    // 创建日志文件
+    const { logFilePath, logId } = logManager.createLogFile('configure');
+    
+    // 使用 nohup 后台执行
+    const command = `cd "${cliPath}" && nohup bash 2-cluster-configs.sh > "${logFilePath}" 2>&1 &`;
+    
+    exec(command, (error) => {
+      if (error) {
+        console.error('Failed to start script:', error);
+        logManager.updateStatus('configure', 'failed');
+      }
+    });
+    
+    // 立即返回，不等待脚本完成
+    logManager.updateStatus('configure', 'started');
+    
+    res.json({
+      success: true,
+      message: 'Cluster configuration started in background',
+      logId: logId,
+      status: 'started'
+    });
+
+  } catch (error) {
+    console.error('Error configuring cluster:', error);
+    res.json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// 获取 Step 1 状态 API
+app.get('/api/cluster/step1-status', async (req, res) => {
+  try {
+    const status = await checkStep1Status();
+    res.json({
+      success: true,
+      data: status
+    });
+  } catch (error) {
+    res.json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// 获取 Step 2 状态 API
+app.get('/api/cluster/step2-status', async (req, res) => {
+  try {
+    const status = await checkStep2Status();
+    res.json({
+      success: true,
+      data: status
+    });
+  } catch (error) {
+    res.json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// 获取日志内容 API
+app.get('/api/cluster/logs/:step', (req, res) => {
+  try {
+    const { step } = req.params;
+    const { offset = 0 } = req.query;
+    
+    const logContent = logManager.getCurrentLogContent(step);
+    const statusFile = path.join(logManager.metadataDir, `${step}_status.json`);
+    
+    let status = { status: 'idle' };
+    if (fs.existsSync(statusFile)) {
+      status = JSON.parse(fs.readFileSync(statusFile, 'utf8'));
+    }
+
+    // 支持增量读取（从指定偏移量开始）
+    const newContent = logContent.slice(parseInt(offset));
+    
+    res.json({
+      success: true,
+      data: {
+        content: newContent,
+        fullContent: logContent,
+        totalLength: logContent.length,
+        status: status.status,
+        timestamp: status.timestamp,
+        logId: status.logId
+      }
+    });
+
+  } catch (error) {
+    console.error('Error reading logs:', error);
+    res.json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// 获取历史日志列表
+app.get('/api/cluster/logs-history', (req, res) => {
+  try {
+    const logFiles = fs.readdirSync(logManager.logsDir)
+      .filter(file => file.endsWith('.log'))
+      .map(file => {
+        const filePath = path.join(logManager.logsDir, file);
+        const stats = fs.statSync(filePath);
+        const [timestamp, step] = file.replace('.log', '').split('_');
+        
+        return {
+          filename: file,
+          step: step,
+          timestamp: timestamp.replace(/_/g, 'T').replace(/-/g, ':'),
+          size: stats.size,
+          created: stats.birthtime,
+          modified: stats.mtime
+        };
+      })
+      .sort((a, b) => new Date(b.created) - new Date(a.created));
+
+    res.json({
+      success: true,
+      data: logFiles
+    });
+
+  } catch (error) {
+    console.error('Error getting log history:', error);
+    res.json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// 获取 CloudFormation 堆栈状态 (保留原有功能)
+app.get('/api/cluster/cloudformation-status', async (req, res) => {
+  try {
+    const { stackName } = req.query;
+    
+    if (!stackName) {
+      return res.json({
+        success: false,
+        error: 'Stack name is required'
+      });
+    }
+
+    console.log(`Getting CloudFormation status for stack: ${stackName}`);
+    
+    const command = `aws cloudformation describe-stacks --stack-name "${stackName}" --output json`;
+    
+    exec(command, { timeout: 30000 }, (error, stdout, stderr) => {
+      if (error) {
+        console.error('CloudFormation status error:', error);
+        
+        // 检查是否是堆栈不存在的错误
+        if (stderr.includes('does not exist')) {
+          return res.json({
+            success: true,
+            data: {
+              StackStatus: 'STACK_NOT_EXISTS',
+              StackName: stackName
+            }
+          });
+        }
+        
+        return res.json({
+          success: false,
+          error: error.message,
+          stderr: stderr
+        });
+      }
+
+      try {
+        const result = JSON.parse(stdout);
+        if (result.Stacks && result.Stacks.length > 0) {
+          const stack = result.Stacks[0];
+          res.json({
+            success: true,
+            data: {
+              StackName: stack.StackName,
+              StackStatus: stack.StackStatus,
+              CreationTime: stack.CreationTime,
+              LastUpdatedTime: stack.LastUpdatedTime,
+              StackStatusReason: stack.StackStatusReason
+            }
+          });
+        } else {
+          res.json({
+            success: false,
+            error: 'Stack not found'
+          });
+        }
+      } catch (parseError) {
+        console.error('Error parsing CloudFormation response:', parseError);
+        res.json({
+          success: false,
+          error: 'Failed to parse CloudFormation response'
+        });
+      }
+    });
+
+  } catch (error) {
+    console.error('Error getting CloudFormation status:', error);
+    res.json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`WebSocket server running on port ${WS_PORT}`);

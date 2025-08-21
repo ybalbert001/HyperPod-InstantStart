@@ -1,8 +1,8 @@
 ttag=$(date +%Y%m%d_%H%M%S)
-milstone=T-torch-recipe
+milstone=T-venv
 
-tarname=${ttag}_model-deployment-ui-${milstone}.tar.gz
-tar -czf $tarname model-deployment-ui/
+tarname=${ttag}_HyperPod-InstantStart-RAW-${milstone}.tar.gz
+tar -czf $tarname HyperPod-InstantStart-RAW/
 aws s3 cp $tarname s3://pdx-cluster-mount/UI_Panel/
 mv $tarname _Backups/
 
@@ -501,9 +501,56 @@ kubectl describe nodes | grep nvidia.com/gpu
 
 
 
-/home/ubuntu/workspace/model-deployment-ui/KUBECTL_OPTIMIZATION_ANALYSIS.md 请基于这个说明，快速了解一下整个项目。只需要理解，暂时无需回复其他内容。
+/home/ubuntu/workspace/HyperPod-InstantStart-RAW/ui-panel/KUBECTL_OPTIMIZATION_ANALYSIS.md 请基于这个说明，快速了解一下整个项目。只需要理解，暂时无需回复其他内容。
 
 现在，在前端页面，我需要在Torch Recipe之前增加一个Script Recipe tab页面，需要填充/home/ubuntu/workspace/model-deployment-ui/templates/hyperpod-training-script-template.yaml，
 infra方面的填充跟其他recipe一样，其他需要有个project path，填充SCRIPT_RECIPE_PROJECTPATH_PH，以及脚本入口，填充SCRIPT_RECIPE_ENTRYPATH_PH。
+
+
+/home/ubuntu/workspace/HyperPod-InstantStart-RAW/ui-panel/KUBECTL_OPTIMIZATION_ANALYSIS.md 请基于这个说明，快速了解一下整个项目。只需要理解，暂时无需回复其他内容。
+
+现在，在前端页面上，我希望在Model Management之前新增一个Cluster Management 的tab页。
+在这个页面，我会让用户能够通过点击来快速拉起集群。用户需要有一些输入信息，你可以参考：/home/ubuntu/workspace/HyperPod-InstantStart-RAW/cli/init_envs，这些：
+export CLOUD_FORMATION_FULL_STACK_NAME=hyperpod-instantstart-stack-0821
+export AWS_REGION=us-west-2
+export EKS_CLUSTER_NAME=eks-cluster-2
+export HP_CLUSTER_NAME=hp-cluster-2
+# export FTP_NAME=your-ftp-name
+export GPU_CAPACITY_AZ=us-west-2a
+export GPU_INSTANCE_TYPE=ml.g6.12xlarge
+export GPU_INSTANCE_COUNT=2
+export DEPLOY_MODEL_S3_BUCKET=pdx-cluster-mount-2
+
+FTP_NAME可以留个开关（或者你看如何设计更好）。
+当用户在UI上填写之后，你可以将对应的值填入init_env中（原来的init_env做个备份，打个timestamp）
+同时，需要有两个按钮，step1 - 创建集群环境； step2 - 集群配置；
+点击step1之后，执行../cli/1-cluster-launch.sh（这里会拉起一个cloudformation，名字是CLOUD_FORMATION_FULL_STACK_NAME，你看是否可以获取其状态并在前端显示是否创建成功）。
+step1成功后，可以点击step2， 执行../cli/2-clusteer-configs.sh，（这里是个单纯的脚本，你看如何获取其执行状态更好），并显示完成状态。
+执行脚本时可以cd到对应路径，因为脚本中有相对路径，需要避免路径的问题。
+另外这个UI如何排版也请设计一下（简单、可靠）。
+你明白我的需求了吗？
+
+> 很不错。。一个问题，可以增加脚本执行的日志吗？类似我在terminal中执行那样。先不用实施，评估一下是否复杂。
+
+稍等。这个看上去比较复杂，是否可以这样。仍然使用nohup执行，但是如果断开ssh/UI，日志就不需要再获取了。然后step1的状态，可以通过查询init_envs中定义的cf名称来获取。step2的完成状态，你可以通过kubectl来查看s3 csi 以及hp-training-operator-hp-training-controller-manager pod是否存在来判定，可以吗？
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
