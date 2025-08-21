@@ -1,0 +1,11 @@
+{
+  "trainingJobName": "hptj-lmf-2k",
+  "instanceType": "ml.g5.12xlarge",
+  "dockerImage": "633205212955.dkr.ecr.us-west-2.amazonaws.com/sm-training-op-torch26-smhp-op-v2:latest",
+  "nprocPerNode": 2,
+  "replicas": 2,
+  "efaCount": 1,
+  "lmfRecipeRunPath": "/s3/training_code/model-training-with-hyperpod-training-operator/llama-factory-project/",
+  "lmfRecipeYamlFile": "qwen06b_full_sft_template.yaml",
+  "mlflowTrackingUri": "arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow"
+}

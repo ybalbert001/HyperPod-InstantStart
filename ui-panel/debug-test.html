@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Test</title>
+</head>
+<body>
+    <h1>Debug Test</h1>
+    <button onclick="testOllamaDeployment()">Test Ollama Deployment</button>
+    <div id="result"></div>
+
+    <script>
+        async function testOllamaDeployment() {
+            const config = {
+                deploymentType: 'ollama',
+                ollamaModelId: 'llama2',
+                replicas: 1,
+                gpuCount: 1,
+                isExternal: true
+            };
+
+            try {
+                console.log('Sending request with config:', config);
+                const response = await fetch('/api/deploy', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(config),
+                });
+                
+                const result = await response.json();
+                console.log('Response:', result);
+                document.getElementById('result').innerHTML = '<pre>' + JSON.stringify(result, null, 2) + '</pre>';
+            } catch (error) {
+                console.error('Error:', error);
+                document.getElementById('result').innerHTML = 'Error: ' + error.message;
+            }
+        }
+    </script>
+</body>
+</html>

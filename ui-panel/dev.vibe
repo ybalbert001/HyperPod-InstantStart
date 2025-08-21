@@ -1,0 +1,509 @@
+ttag=$(date +%Y%m%d_%H%M%S)
+milstone=T-torch-recipe
+
+tarname=${ttag}_model-deployment-ui-${milstone}.tar.gz
+tar -czf $tarname model-deployment-ui/
+aws s3 cp $tarname s3://pdx-cluster-mount/UI_Panel/
+mv $tarname _Backups/
+
+traintar=${ttag}_model-training-with-hyperpod-training-operator-${milstone}.tar.gz
+tar -czf $traintar model-training-with-hyperpod-training-operator/
+aws s3 cp $traintar s3://pdx-cluster-mount/UI_Panel/
+mv $traintar _Backups/
+
+tar -xvf "$(date +%Y%m%d_%H%M%S)_model-deployment-ui.tar.gz"
+
+
+source ~/uvenv/py312/bin/activate &&  uv pip install hyperpod-elastic-agent
+
+我在本地有一个模型部署的工程：/home/ubuntu/workspace/250805-instant-start-model-hosting-on-hyperpod/deploy-model。现在，我希望构建一个前端页面，不需要太复杂，但是需要有一些基本功能。
+1/ 页面上需要有一个部分，让用户填写一些字段，且这些字段会配置到yaml中，用户在eks上部署，字段包含（比如qwen-vllm.yaml）：
+    - replicas个数
+    - model-tag，用户替换跟qwen相关的所有命名
+    - HUGGING_FACE_HUB_TOKEN，可以不写
+    - model_id_or_path，用于替换 "Qwen/Qwen3-0.6B" # 或使用S3挂载路径 /models/Qwen3-0.6B
+    - gpu per model，用于填充 nvidia.com/gpu: 2
+
+2/ 简单地展示当前eks集群的机器，及每个机器空余的卡数。比如 inst-1: 1/4; inst-2: 0/4。
+3/ 当用户完成输入后，点击提交，则执行kubectl apply -f xxx.yaml
+4/ 页面的某个区域持续刷新展示kubectl get pods的结果
+5/ 页面的某个区域，展示kubectl get service的结果
+6/ 
+请做一个规划，包括页面如何设计，比如左上部分展示配置及提交按钮；左下为集群状态，pod/service；右上是用户输入的curl请求，右下是模型url返回的结果，包括展示流式。
+以及如何搭建前端页面？有看上去比较专业，成熟的工具吗？
+
+
+
+1. Cluster Status没有自动刷新，或者刷新时间慢，请确认下
+2. Model Configuration的ollama模板中，
+    - Ollama Model ID不要用固定的选项，让用户自由填写
+    - Ollama Model ID的帮助按钮中的说明文字，增加link - https://ollama.com/search
+    - modeltag去掉吧，直接用model Id，但是替换掉比如:等字符即可
+3. 刚才我通过UI删除了你部署的test deployment，但是pod仍然存在，请确认下
+
+
+
+1. Model Configuration中，vllm的部署部分，如果huggingface为空，那么template中不要添加：
+- name: HUGGING_FACE_HUB_TOKEN
+    value: "TOKEN"  # 请替换为你的实际token
+2. Model Testing 部分，当切换ollama模型时，
+    - api用/api/generate没问题
+    - paylaod需要用对应的模型来填充，比如"model": "gpt-oss:20b"， 或者"model": "gpt-oss:120b", 或者其他modelid
+3. Model Testing 部分，当切换vllm模型时，
+    - api需要用/v1/chat/completions
+    - 同时payload需要用/v1/chat/completions对应的格式组织
+可以吗？
+
+
+请参考：/home/ubuntu/workspace/model-deployment-ui/PROJECT_INTRO.md，了解一下这个项目。
+现在有一些小问题，请帮我做一些调整跟修改：
+1. 当点击模型部署之后，会生成一个yaml文件，请帮我将这个文件的保存路径放在项目中（同时也需要在gitignore中添加），方便调试；
+2. gitignore整体需要做个简化，去掉跟本项目无关的内容；
+3. Model Testing 部分，也需要增加一个刷新按钮；跟其他的自动刷新机制一样，全局配置一个30sec的自动刷新时间；
+可以吗？
+
+
+
+现在有一个问题，当我部署模型之后（无论是ollama还是vllm），在payload的部分，其中的"model"字段，需要跟部署时的modelid完全一致。现在vllm是这样，但是ollama部署后，payload中的model字段如下：{
+  "model": "gpt-oss-20b",
+  "prompt": "Hello, how are you today?",
+  "stream": false
+}。请帮我查看是什么问题，并做个修改。
+
+
+
+请参考：/home/ubuntu/workspace/model-deployment-ui/PROJECT_INTRO.md，了解一下这个项目。
+
+
+请了解一下整个项目：/home/ubuntu/workspace/model-deployment-ui。并将你认为重要的信息整理到PROJECT_INTRO.md，方便你后续理解。
+
+
+
+### 整体布局结构
+┌─────────────────────────────────────────────────────────────┐
+│                    主标签切换区域                            │
+│  [Inference] [Training]                                    │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌─ Inference Panel (当前激活) ─────────────────────────────┐ │
+│  │                                                         │ │
+│  │  ┌─────────────────────┬─────────────────────────────┐  │ │
+│  │  │  Model Configuration │     Model Testing          │  │ │
+│  │  │  ┌─────────────────┐ │  ┌─────────────────────────┐ │  │ │
+│  │  │  │ • Replicas      │ │  │ • Service Selection     │ │  │ │
+│  │  │  │ • Model Tag     │ │  │ • JSON Payload         │ │  │ │
+│  │  │  │ • HF Token      │ │  │ • cURL Generation      │ │  │ │
+│  │  │  │ • VLLM Args     │ │  │ • Test Results         │ │  │ │
+│  │  │  │ • Deploy Button │ │  │                         │ │  │ │
+│  │  │  └─────────────────┘ │  └─────────────────────────┘ │  │ │
+│  │  └─────────────────────┴─────────────────────────────┘  │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                             │
+│  ┌─ Training Panel (隐藏状态) ──────────────────────────────┐ │
+│  │                                                         │ │
+│  │  ┌─────────────────────┬─────────────────────────────┐  │ │
+│  │  │  Training Config    │     Training Monitor        │  │ │
+│  │  │  ┌─────────────────┐ │  ┌─────────────────────────┐ │  │ │
+│  │  │  │ 先留空         │ │  │ • 先留空                     │ │  │ │
+│  │  │  └─────────────────┘ │  └─────────────────────────┘ │  │ │
+│  │  └─────────────────────┴─────────────────────────────┘  │ │
+│  └─────────────────────────────────────────────────────────┘ │
+├─────────────────────────────────────────────────────────────┤
+│                    底部监控区域                              │
+│  ┌─────────────────────┬─────────────────────────────────┐  │
+│  │   Cluster Status    │      Status Monitor             │  │
+│  │   • GPU Usage       │      • Pods Status              │  │
+│  │   • Node Info       │      • Services Status          │  │
+│  │   • Resources       │      • Real-time Updates        │  │
+│  └─────────────────────┴─────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+
+
+
+请了解一下整个项目：/home/ubuntu/workspace/model-deployment-ui。如果你完全理解了，请回答理解。除此之外，无需回复其他内容。
+
+
+请了解一下整个项目：/home/ubuntu/workspace/model-deployment-ui。并将你认为重要的信息整理到PROJECT_INTRO.md，方便你后续理解。
+
+现在，我需要在Inference，Training这两个tab页之外，再增加一个tab页，名字叫Model Management，布局跟inference，training类似，分两大块。
+1. 左边一块是模型下载，用户需要填写：
+    - huggingface模型ID，并且替换/home/ubuntu/workspace/model-deployment-ui/templates/hf-download-template.yaml中的HF_MODEL_ID；
+    - huggingface token （跟vllm中的一样折叠起来，同时如果用户填写，则构建hf-download-template中的env）
+2. 右边展示当前storage class/pv/pvc里声明的s3桶中的信息，你可以通过比如aws S3 ls s3://桶名，来获取信息
+
+
+
+请帮我整体review一下这个项目。看看是否有不合理的地方，先尽量罗列出来，不要改动任何地方。
+
+> • 大量同步的kubectl调用
+• WebSocket广播没有节流
+• 前端组件重复渲染
+• 多个组件中重复的API调用逻辑
+• 相似的错误处理代码
+这些地方我觉得比较重要，能具体一些吗？列出问题以及修改方案。
+
+
+kubectl get node hyperpod-i-025cd4f55f0d613b9 -o jsonpath='{.status.allocatable.nvidia\.com/gpu}'
+kubectl get node hyperpod-i-025cd4f55f0d613b9 -o jsonpath='{.status.capacity.nvidia\.com/gpu}'
+
+
+请了解一下整个项目：/home/ubuntu/workspace/model-deployment-ui。如果你完全理解了，请回答理解。除此之外，无需回复其他内容。
+
+现在我需要进行一些修改：
+1. Inference标签页中，在Advanced Settings需要增加一个docker image的填写选项，默认值为：vllm/vllm-openai:latest，替换vllm-template.yaml中的
+image: vllm/vllm-openai:latest
+
+在Training标签页的Training Configuration中需要增加如下功能：
+1. 你可以参考/home/ubuntu/workspace/model-deployment-ui/templates/smhp-training-operator-launch.yaml，并新建一个初始模板；
+2. 需要提供一个输入框，填写训练任务名称，来替换yaml中的name: gptnx-1b-fsdp-t1，初始默认值为hyperpodpytorchjob-1；
+3. 第二个输入框是docker image，默认值为633205212955.dkr.ecr.us-west-2.amazonaws.com/sm-training-op-torch24-ec2:latest，用于替换模板文件中的image字段值；
+4. 需要提供两个输入框，分别替换模板中的：nprocPerNode: "1"（注意不管输入如何，这个字段需要是字符串的形式），以及replicas，默认值都是1；
+5. 需要填写gpu，efa的数量，用于替换模板中的requests:
+                  nvidia.com/gpu: 1
+                  vpc.amazonaws.com/efa: 1
+                limits:
+                  nvidia.com/gpu: 1
+                  vpc.amazonaws.com/efa: 1
+，gpu的默认值为8，efa的默认值为16；
+6. 需要提供入口脚本的路径，替换command: ["bash", "/s3/training_code/model-training-with-hyperpod-training-operator/fsdp-entry-smhp-op.sh"]中的.sh部分；
+7. 需要提供HyperPod training Operator logMonitoringConfiguration， 如果填写了，可以放在yaml中最后注释的部分：
+    # logMonitoringConfiguration: 
+    #   - name: "JobStart"
+    #     logPattern: ".*Experiment configuration.*"
+    #     expectedStartCutOffInSeconds: 120
+    #   - name: "HighLossDetection"
+    #     logPattern: ".*\\[train\\.py:\\d+\\] Batch \\d+ Loss: (\\d+\\.\\d+).*"
+    #     metricThreshold: 1
+    #     operator: "lteq"
+    #     metricEvaluationDataPoints: 100
+内容有点多，明白了吗？
+
+
+
+
+现在，我需要在Training Monitor的部分进行一些开发。
+1. 第一部分：目前，我可以通过：kubectl get hyperpodpytorchjob
+NAME                   AGE
+hyperpodpytorchjob-1   61s
+的方式来获取任务；同时我会通过kubectl delete hyperpodpytorchjob hyperpodpytorchjob-1
+hyperpodpytorchjob.sagemaker.amazonaws.com "hyperpodpytorchjob-1" deleted这个方式来delete。因此，在ui上，我希望有一个下拉框来选择当前集群的hyperpodpytorchjob。
+2. 第二部分：当training启动后，我通常是通过kubectl get pods来看到training相关的pods，并通过kubectl logs -f podname 来查看日志。因此UI的第二部分我希望能看到某一个hyperpodpytorchjob的关联pods的日志（不同pod的日志可以用不同的颜色）。
+当我从第一部分选择了某个job后，这部分就显示出这个job 中pods的日志。
+你明白我的需求了吗？
+
+
+
+
+请了解一下整个项目：/home/ubuntu/workspace/model-deployment-ui。如果你完全理解了，请回答理解。除此之外，无需回复其他内容。
+
+现在，在Training标签页中，需要做一些调整：
+Training Configuration跟Training Job Monitor，布局上应该是放在同一行中，就跟inference中的一样。
+你明白了吗？
+
+现在，Select Training Job的部分，有一个Delete Job的按钮。这个我觉得，是否可以放到右下方，App Status的部分。你可以在App Status中新建一个tab 页，名称是HyperPod PytorchJob，然后跟Deployments一样，可以用删除按钮删除。
+
+
+很好，现在只有一些小的显示问题需要修改：
+1. App Status的HyperPod PytorchJob，Status是Running时候，Running的标签是有个动态效果，是否可以不要这个动态效果，标签的形式/颜色都没有问题；
+2. App Status的HyperPod PytorchJob，delete的风格跟deployments中的delete风格保持一致，实心红色；
+3. App Status的Deployments前面没有一个图标，而其他几个都有；
+
+另外，Training Job Monitor中，关于pods日志的start streaming按钮，如果按钮未点击的时候，可以是白色，点击了之后再显示颜色。可以吗？
+
+
+我需要保留完整的日志，用于调试。我希望的是，前端仍保持现有的效果，但是为了防止内存风险，限制一下每个pod日志显示的数量。同时，所有日志存储于后端。比如在项目路径/logs/hyperpodpytorchjob/hyperpodpytorchjob-1/podname.log... 。 
+这样可行吗？
+
+
+请了解一下整个项目：/home/ubuntu/workspace/model-deployment-ui/PROJECT_ANALYSIS.md。如果你完全理解了，请回答理解。除此之外，无需回复其他内容。
+
+目前，项目中可能存在一些bug，请帮我检查一下。App Status中，点击refresh all按钮，看上去并非所有组件都被刷新了，请检查一下是所有App Status都会被刷新吗？
+另外，App Status是否会自动刷新，间隔时间是多久？
+
+
+另外发现了一个问题，在training标签页中，当我点击了Deploy Training Job按钮之后，我发现页面右上角的Status，会从绿色变成“Status: 🟠 Offline (Refresh to reconnect)”，然后刷新网页就变好了。这是什么原因。
+
+
+curl -X GET http://k8s-default-vllms3qw-39d72983ea-fc2ff427ee8d9187.elb.us-west-2.amazonaws.com:8000/v1/models
+
+
+好的，现在请将你一些重要的设计机制，比如全局刷新，统一websocket等信息，整理后更新到/home/ubuntu/workspace/model-deployment-ui/PROJECT_ANALYSIS.md的合适部分。
+
+
+
+
+请了解一下整个项目：/home/ubuntu/workspace/model-deployment-ui/PROJECT_ANALYSIS.md，现在有个问题，在右下方HyperPod PytorchJob中，点击删除任务，会有多次xxx delete successfully。请看一下是什么原因
+
+现在，我希望在training tab页的右边，再增加一个新的tab页，名称为training History。这个页面主要展示历史的训练情况。信息来自托管mlflow的tracking server。具体metric的获取你可以参考：/home/ubuntu/workspace/model-deployment-ui/mlflow/get_experiment_metrics.PytorchJob，然后跟Deployments一样，可以用删除按钮删除。
+这个python依赖于pip install mlflow==3.0.0 sagemaker-mlflow==0.1.0 pandas。请考虑一下如何实现。
+
+
+source ~/uvenv/py312/bin/activate && uv pip install mlflow==3.0.0 sagemaker-mlflow==0.1.0 pandas
+
+在Training History这里，目前显示的表格，信息来自于：/home/ubuntu/workspace/model-deployment-ui/mlflow/get_training_history.py。现在，每个mlflow run上有tag，我希望将这些tag信息作为新的column显示在表格上。同时，当前的表格中，可以将Epoch去掉。
+
+
+ /home/ubuntu/workspace/hyperpod_elastic_agent-1.0.0 现在请参考这个代码，这是文档上说的启动方式：hyperpodrun \
+    --nnodes=${NNODES} --nproc-per-node=${NPROC_PER_NODE} \
+    --server-host=0.0.0.0 --server-port=8080 \
+    --tee=3 --log_dir=/tmp/hyperpod \
+    --post-train-script="nohup python $LLAMA_FACTORY_PRJ/set_mlflow_tags.py > /tmp/hyperpod/mlflow_tags.log 2>&1 & exit 0" \
+    $LLAMA_FACTORY_LAUNCHER \
+        $LLAMA_FACTORY_PRJ/qwen06b_full_sft.yaml。但是我发现，当我使用了--post-train-script这个参数后，任务会反复重启，不符合预期。请看看是否能
+找到什么线索。
+
+
+
+
+
+请了解一下整个项目：/home/ubuntu/workspace/model-deployment-ui。如果你完全理解了，请回答理解。除此之外，无需回复其他内容。
+
+vllm/vllm-openai:latest
+lmsysorg/sglang:latest
+vllm/vllm-openai:gptoss
+
+python3 -m sglang.launch_server --model-path meta-llama/Llama-3.1-8B-Instruct --host 0.0.0.0 --port 30000
+
+关于training history的展示，我发现每次点击标签进入后，都要完全从mlflow server获取，能否改成点击刷新时才获取？
+
+现在，关于模型部署部分。我希望将Docker Image的输入部分做一些修改。首先，将其从advanced setting中拿出。
+另外，Docker Image是否可以改成某种组件，既可以选择几个固定选项：vllm/vllm-openai:latest
+lmsysorg/sglang:latest
+vllm/vllm-openai:gptoss，又可以允许自己输入？
+另外，对于现在vllm entry point的校验，可以增加一个python3 -m sglang.launch_server
+
+
+另外，VLLM/SGLang Command的预填充部分，需要做个调整。当选择了vllm的，按照当前的填充，当选择了sglang的容器，则使用：python3 -m sglang.launch_server \
+--model-path Qwen/Qwen3-0.6B \
+--tp-size 1 \
+--host 0.0.0.0 \
+--port 8000 \
+--trust-remote-code；当容器时vllm的gptoss时，则使用:python3 -m vllm.entrypoints.openai.api_server \
+--model openai/gpt-oss:120b \
+--tensor-parallel-size 2 \
+--host 0.0.0.0 \
+--port 8000 \
+--trust-remote-code
+
+
+/home/ubuntu/workspace/model-deployment-ui/KUBECTL_OPTIMIZATION_ANALYSIS.md 请基于这个说明，快速了解一下整个项目。只需要理解，暂时无需回复其他内容。
+
+现在我的团队有两个主要的需求：
+1. 团队的产品经理，他们需要只读由我管理的mlflow tracking server，他们甚至往往没有eks集群，只有基本的python环境； 
+2. 团队的ML工程师，他们需要在他们账号的EKS集群进行训练任务，并将实验记录上传到我管理的mlflow tracking server；
+那么，对于1来说，是否有更简单的方式？对于2来说，目前的鉴权方式是否可以再化简？（如果不能化简也没关系）
+
+
+
+
+
+
+
+
+请基于/home/ubuntu/workspace/model-deployment-ui/KUBECTL_OPTIMIZATION_ANALYSIS.md，了解一下整个项目：/home/ubuntu/workspace/model-deployment-ui。
+如果你完全理解了，请回答理解。除此之外，无需回复其他内容。
+
+
+/home/ubuntu/workspace/model-deployment-ui/KUBECTL_OPTIMIZATION_ANALYSIS.md 请基于这个说明，快速了解一下整个项目。只需要理解，暂时无需回复其他内容。
+
+
+
+
+在training标签页的HyperPodPytorchJob Recipes中，目前有一个子页面是：LlamaFactory Recipe。现在我希望在旁边增加一个verl Recipe的标签页。
+
+> 请检查一下，之前的改动是否生效了，有什么问题？是否有改变原本的功能，或者影响了其他功能。
+
+
+我在ec2本地部署了一个前端页面，参考/home/ubuntu/workspace/model-deployment-ui/start.sh。如果我直接运行start.sh，那么是否当ec2断开ssh连接后，服务也就中断了？
+从脚本内容可以看出，它启动了前端和后端服务（端口 3000、3001、8081），这些进程都是在当前 SSH 会话中运行的。当 SSH 连接断开时，会话结束，所有相关进程也会被终止。
+
+## 方案1：使用 nohup
+bash
+nohup ./start.sh > logs/app.log 2>&1 &
+
+现在，我希望将这个url暴露到公网，有什么简单，安全的方式吗？
+
+
+当前项目中的Training History部分，是通过/home/ubuntu/workspace/model-deployment-ui/mlflow/get_training_history.py来获取信息的。但是看上去tracking server 信息被hard code了。能否在ui上，比如refresh按钮旁边，增加一个配置按钮，然后让用户配置uri（默认值或者前端的预填充可以是当前的这个），可行吗
+
+
+另外，在当前HyperPodPytorchJob Recipes中，有了两个recipes，我希望在LlamaFactory Recipe之前增加一个Torch Recipe，然后所有的功能都跟LlamaFactory Recipe完全一样。
+只是Entry Script Path改成Entry Python Script Path，以及再后面增加一个Python script parameters（预填充为learning_rate 1e5 \ --batch_size 1）。
+
+
+TBD：eiifccvjtlgtkeivvhculeeciigljftvgjcclfjclhgd
+eiifccvjtlgtceueicbjdjhhtekbkjdbdlefncjtedlf
+
+url暴露，内网登陆
+训练部分增加MLFlow兼容情况（没有arn的情况）
+训练部分增加配方：
+    - llamafactory配方自动解析dataset，cutofflen并提交至training history
+    - 增加verl配方
+
+
+/home/ubuntu/workspace/model-deployment-ui/KUBECTL_OPTIMIZATION_ANALYSIS.md 请基于这个说明，快速了解一下整个项目。只需要理解，暂时无需回复其他内容。
+
+在Training tab页，Torch Recipe中的Entry Python Script Path内容，你需要
+
+
+在Training tab页中的LlamaFactory Recipe，我需要做一些修改：
+1. Entry Script Path去掉，然后增加3项输入，分别替换模板/home/ubuntu/workspace/model-deployment-ui/templates/hyperpod-training-lmf-template.yaml中的对应字段：
+    - a. LlamaFactory Recipe Run Path(默认值先写/s3/training_code/model-training-with-hyperpod-training-operator/llama-factory-project/)，替换模板中的LMF_RECIPE_RUNPATH_PH；
+    - b. LlamaFactory config YAML File Name（默认值先写qwen06b_full_sft_template.yaml），替换模板中的LMF_RECIPE_YAMLFILE_PH；
+    - c. DeepSpeed Json Config File Name(默认值先写deepspeed_conf/ds_z0_config.json)，替换模板中的DS_JSONFILE_PH。
+
+外，当点击launch training之后，填充template得到的yaml文件，页存储到template/中，比如template/training/lma_$timestamp.yaml。
+
+
+## 方法1: 在Mac终端中查看公网IP
+
+在你的Mac终端中运行：
+curl ifconfig.me
+https://ifconfig.me/
+
+
+请分析下这个项目/home/ubuntu/workspace/_DEV/hyperpod_elastic_agent-1.0.0，为什么我在运行过程中总是有如下报错：
+21:20:16[hyperpodpytorchjob-2-pods-0]Traceback (most recent call last): File "/usr/local/lib/python3.12/site-packages/uvicorn/protocols/http/httptools_impl.py", line 409, in run_asgi result = await app( # type: ignore[func-returns-value] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ File "/usr/local/lib/python3.12/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__ return await self.app(scope, receive, send) ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ File "/usr/local/lib/python3.12/site-packages/fastapi/applications.py", line 1054, in __call__ await super().__call__(scope, receive, send) File "/usr/local/lib/python3.12/site-packages/starlette/applications.py", line 113, in __call__ await self.middleware_stack(scope, receive, send) File "/usr/local/lib/python3.12/site-packages/starlette/middleware/errors.py", line 186, in __call__ raise exc File "/usr/local/lib/python3.12/site-packages/starlette/middleware/errors.py", line 164, in __call__ await self.app(scope, receive, _send) File "/usr/local/lib/python3.12/site-packages/starlette/middleware/exceptions.py", line 63, in __call__ await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send) File "/usr/local/lib/python3.12/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app raise exc File "/usr/local/lib/python3.12/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app await app(scope, receive, sender) File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 716, in __call__ await self.middleware_stack(scope, receive, send) File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 736, in app await route.handle(scope, receive, send) File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 290, in handle await self.app(scope, receive, send) File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 78, in app await wrap_app_handling_exceptions(app, request)(scope, receive, send) File "/usr/local/lib/python3.12/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app raise exc File "/usr/local/lib/python3.12/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+21:20:16[hyperpodpytorchjob-2-pods-0] await app(scope, receive, sender) File "/usr/local/lib/python3.12/site-packages/starlette/routing.py", line 75, in app response = await f(request) ^^^^^^^^^^^^^^^^ File "/usr/local/lib/python3.12/site-packages/fastapi/routing.py", line 302, in app raw_response = await run_endpoint_function( ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ File "/usr/local/lib/python3.12/site-packages/fastapi/routing.py", line 215, in run_endpoint_function return await run_in_threadpool(dependant.call, **values) ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ File "/usr/local/lib/python3.12/site-packages/starlette/concurrency.py", line 38, in run_in_threadpool
+21:20:16[hyperpodpytorchjob-2-pods-0] return await anyio.to_thread.run_sync(func) ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ File "/usr/local/lib/python3.12/site-packages/anyio/to_thread.py", line 56, in run_sync return await get_async_backend().run_sync_in_worker_thread( ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ File "/usr/local/lib/python3.12/site-packages/anyio/_backends/_asyncio.py", line 2476, in run_sync_in_worker_thread return await future ^^^^^^^^^^^^ File "/usr/local/lib/python3.12/site-packages/anyio/_backends/_asyncio.py", line 967, in run result = context.run(func, *args) ^^^^^^^^^^^^^^^^^^^^^^^^ File "/usr/local/lib/python3.12/site-packages/hyperpod_elastic_agent/server/server.py", line 70, in _api_status log_state, log_rule_names = self._agent.get_log_agent_state() ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ File "/usr/local/lib/python3.12/site-packages/hyperpod_elastic_agent/hyperpod_elastic_agent.py", line 417, in get_log_agent_state for log_eval_result in self._log_agent.log_eval_results:
+21:20:16[hyperpodpytorchjob-2-pods-0] ^^^^^^^^^^^^^^^ AttributeError: 'HyperPodElasticAgent' object has no attribute '_log_agent' INFO: 10.1.92.10:35326 - "GET /status HTTP/1.1" 200 OK
+
+
+
+# 读取值
+yq '.key' file.yaml
+yq '.database.host' file.yaml
+
+# 设置值
+yq '.key = "new_value"' -i file.yaml
+
+# 添加新键
+yq '.new_key = "value"' -i file.yaml
+
+# 删除键
+yq 'del(.key)' -i file.yaml
+
+# 列出所有键
+yq 'keys' file.yaml
+
+
+
+if MLFLOW_TRACKING_URI 存在且不是"":
+    yq '.report_to = "mlflow"' -i $LMF_RECIPE_YAML_FILE
+
+    如果$LMF_RECIPE_YAML_FILE有run_name：
+        run_name_value=读取run_name的值
+        写回run_name: run_name_value_$(date '+%Y%m%d_%H%M%S')
+    else：
+        写入run_name: run_$(date '+%Y%m%d_%H%M%S')
+else:
+    yq 'del(.report_to)' -i $LMF_RECIPE_YAML_FILE
+    yq 'del(.run_name)' -i $LMF_RECIPE_YAML_FILE
+
+
+if $LMF_RECIPE_YAML_FILE中没有dataset_dir，或者dataset_dir是data：
+    写入dataset_dir: $LMA_RECIPE_LLAMA_FACTORY_DIR/data
+
+
+Training Job Monitor中，查看完整日志，看上去不是最新的。可能是写日志的时候到本地，发现有文件了就没有覆盖。如果是这样的话，你可以在本地存储日志时，加上timestamp等信息。
+
+
+目前的Training History tab页面中，显示的表格需要做些修改。需要将mlflow run 上面的所有tag都显示出来。如果表格宽度不够，可以去掉train loss以及loss。从mlflow获取信息的逻辑是在：
+/home/ubuntu/workspace/model-deployment-ui/mlflow/get_training_history.py。我说清楚了吗
+
+
+
+/home/ubuntu/workspace/model-deployment-ui/KUBECTL_OPTIMIZATION_ANALYSIS.md 请基于这个说明，快速了解一下整个项目。只需要理解，暂时无需回复其他内容。
+
+请参考我目前部署模型的方式：/home/ubuntu/workspace/model-deployment-ui/templates/vllm-template.yaml。目前是部署了nlb吗？
+
+
+基于/home/ubuntu/workspace/model-deployment-ui/templates/vllm-template.yaml这个部署方式，现在我有个需求。
+我的集群有3个gpu节点，他们都部署了同一个模型，其中node0，1是接入了service/nlb0，通过url0向业务A提供服务；node2接入了service/nlb1，通过url1向业务B提供服务。
+业务A流量稳定，业务B流量会有波动，突增等。现在我需要判断业务B的流量情况，当流量高于某个threshold之后，我需要将业务A的两个节点，分出一个给业务B。
+但是请注意，因为他们都部署一样的模型，所以我不希望类似auto scaling的方式，来从业务A中缩容，让业务B扩容，因为这会涉及到模型的卸载/加载，非常耗时。我希望能直接把服务A的节点接入服务B，而节点上的模型部署/pod保持不变。
+你理解我的需求了吗？是否有办法可以实现这个需求？
+
+
+在training的torch recipe中，当我点击launch training job时，会有popup错误弹出：Training launch failed: LlamaFactory Recipe Run Path is required。这可能是之前从llamafacto
+ry复制的时候没有完全修改。请帮我检查一下。
+
+=== 建议的解决方案 ===
+1. 将 containerd 数据目录迁移到 NVME 存储
+2. 或者配置 containerd 使用 NVME 作为镜像存储
+3. 清理现有的镜像缓存
+
+
+现在我希望在当前的eks集群配置fsx，我已经创建了fsx，但是不确定安全组等是否可用。
+这些是从fsxL console上拿到的信息。
+fs-0833c5da9d5da866d
+us-west-2c
+mr6gnb4v
+vpc-08a5d58ba21a52c77
+subnet-0b29cab84f8755af7
+fs-0833c5da9d5da866d.fsx.us-west-2.amazonaws.com
+
+
+
+请帮我看一下这个路径下的md：/home/ubuntu/workspace/production-stack/tutorials，00/01我需要配置哪些？我已经有一个可以运行的EKS GPU集群了。
+## 必需配置的步骤
+
+### 1. 安装 KubeRay Operator (00-b)
+由于你已有EKS集群，只需要安装KubeRay Operator：
+
+bash
+# 添加 KubeRay Helm 仓库
+helm repo add kuberay https://ray-project.github.io/kuberay-helm/
+helm repo update
+
+# 安装 KubeRay Operator
+helm install kuberay-operator kuberay/kuberay-operator --version 1.2.0
+
+# 验证安装
+kubectl get pods -A | grep kuberay-operator
+
+
+### 2. 部署 vLLM Production Stack (01)
+选择适合的Helm安装方式：
+
+bash
+# 添加 vLLM Helm 仓库
+helm repo add vllm https://vllm-project.github.io/production-stack
+
+# 使用最小配置部署
+helm install vllm vllm/vllm-stack -f tutorials/assets/values-01-minimal-example.yaml
+
+
+## 跳过的步骤
+
+00-a, 00-c, 00-install-kubernetes-env.md - 这些都是Kubernetes环境安装，你已有EKS集群可以跳过
+
+01-b-minimal-helm-installation-amd.md - 除非你的EKS节点是AMD架构，否则使用通用版本即可
+
+## 推荐的配置流程
+
+1. 验证EKS集群状态：
+bash
+kubectl get nodes
+kubectl get pods -A
+
+
+2. 确认GPU支持：
+bash
+kubectl describe nodes | grep nvidia.com/gpu
+
+
+3. 安装KubeRay Operator (按照00-b文档)
+
+4. 部署基础vLLM服务 (按照01文档)
+
+5. 根据需求配置高级功能 (02-basic-vllm-config.md等)
+
+
+
+/home/ubuntu/workspace/model-deployment-ui/KUBECTL_OPTIMIZATION_ANALYSIS.md 请基于这个说明，快速了解一下整个项目。只需要理解，暂时无需回复其他内容。
+
+现在，在前端页面，我需要在Torch Recipe之前增加一个Script Recipe tab页面，需要填充/home/ubuntu/workspace/model-deployment-ui/templates/hyperpod-training-script-template.yaml，
+infra方面的填充跟其他recipe一样，其他需要有个project path，填充SCRIPT_RECIPE_PROJECTPATH_PH，以及脚本入口，填充SCRIPT_RECIPE_ENTRYPATH_PH。
+
+
