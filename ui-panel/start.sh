@@ -2,6 +2,8 @@
 
 # Model Deployment UI 启动脚本
 
+./_setup.sh
+
 echo "🚀 Starting Model Deployment Management Dashboard..."
 
 # 检查Node.js版本
