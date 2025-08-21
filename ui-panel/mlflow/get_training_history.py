@@ -18,6 +18,7 @@ def get_training_history(tracking_uri=None):
         # MLflow tracking server URI - 从命令行参数获取，或使用默认值
         if tracking_uri is None:
             tracking_uri = "arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow"
+            return
         
         print(f"🔍 连接到 MLflow: {tracking_uri}", file=sys.stderr)
         mlflow.set_tracking_uri(tracking_uri)
