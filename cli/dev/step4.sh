@@ -1,5 +1,5 @@
 source init_envs
-source env_vars
+source stack_envs
 
 EXEC_ROLE_NAME=${EXECUTION_ROLE##*/}
 

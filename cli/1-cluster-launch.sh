@@ -32,6 +32,7 @@ if [ -n "$FTP_NAME" ]; then
   {"ParameterKey": "AvailabilityZoneId", "ParameterValue": "$AWS_AZ"},
   {"ParameterKey": "AcceleratedInstanceType", "ParameterValue": "$GPU_INSTANCE_TYPE"},
   {"ParameterKey": "AcceleratedInstanceCount", "ParameterValue": "$GPU_INSTANCE_COUNT"},
+  {"ParameterKey": "AcceleratedEBSVolumeSize", "ParameterValue": "500"},
   {"ParameterKey": "CreateGeneralPurposeInstanceGroup", "ParameterValue": "false"},
   {"ParameterKey": "NodeRecovery", "ParameterValue": "None"},
   {"ParameterKey": "EnableInstanceStressCheck", "ParameterValue": "false"},
@@ -54,6 +55,7 @@ else
   {"ParameterKey": "AvailabilityZoneId", "ParameterValue": "$AWS_AZ"},
   {"ParameterKey": "AcceleratedInstanceType", "ParameterValue": "$GPU_INSTANCE_TYPE"},
   {"ParameterKey": "AcceleratedInstanceCount", "ParameterValue": "$GPU_INSTANCE_COUNT"},
+  {"ParameterKey": "AcceleratedEBSVolumeSize", "ParameterValue": "500"},
   {"ParameterKey": "CreateGeneralPurposeInstanceGroup", "ParameterValue": "false"},
   {"ParameterKey": "NodeRecovery", "ParameterValue": "None"},
   {"ParameterKey": "EnableInstanceStressCheck", "ParameterValue": "false"},
@@ -64,6 +66,19 @@ EOL
     curl -o /tmp/main-stack.yaml https://raw.githubusercontent.com/aws-samples/awsome-distributed-training/refs/heads/main/1.architectures/7.sagemaker-hyperpod-eks/cfn-templates/nested-stacks/main-stack.yaml 
     TEMPLATE_FILE="/tmp/main-stack.yaml"
 fi
+
+
+CURRENT_ROLE_ARN=$(aws sts get-caller-identity --query Arn --output text)
+CURRENT_ROLE_NAME=$(echo "$CURRENT_ARN" | sed 's/.*role\///g' | sed 's/\/.*//g')
+IAM_ROLE_ARN=arn:aws:iam::$ACCOUNT_ID:role/$CURRENT_ROLE_NAME
+
+aws sagemaker create-mlflow-tracking-server \
+    --tracking-server-name "$HP_CLUSTER_NAME-mlflow-server" \
+    --artifact-store-uri "s3://${DEPLOY_MODEL_S3_BUCKET}" \
+    --tracking-server-size "Small" \
+    --mlflow-version "3.0" \
+    --role-arn $IAM_ROLE_ARN \
+    --region $AWS_REGION
 
 # Create CloudFormation stack
 echo "Creating CloudFormation stack: $CLOUD_FORMATION_FULL_STACK_NAME"

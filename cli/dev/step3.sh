@@ -1,7 +1,7 @@
 source init_envs
-source env_vars
+source stack_envs
 
-aws s3 mb s3://$DEPLOY_MODEL_S3_BUCKET --region ${AWS_REGION}
+# aws s3 mb s3://$DEPLOY_MODEL_S3_BUCKET --region ${AWS_REGION}
 
 aws iam put-role-policy \
   --role-name ${EXECUTION_ROLE##*/} \

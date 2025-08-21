@@ -1,12 +1,12 @@
-export CLOUD_FORMATION_FULL_STACK_NAME=hp-eks-full-stack-0805
+export CLOUD_FORMATION_FULL_STACK_NAME=hyperpod-instantstart-stack-0821
 export AWS_REGION=us-west-2
-export EKS_CLUSTER_NAME=eks-cluster-1
-export HP_CLUSTER_NAME=hp-cluster-1
+export EKS_CLUSTER_NAME=eks-cluster-2
+export HP_CLUSTER_NAME=hp-cluster-2
 # export FTP_NAME=your-ftp-name
 export GPU_CAPACITY_AZ=us-west-2a
-export GPU_INSTANCE_TYPE=ml.g5.12xlarge
+export GPU_INSTANCE_TYPE=ml.g6.12xlarge
 export GPU_INSTANCE_COUNT=2
-export DEPLOY_MODEL_S3_BUCKET=pdx-cluster-mount
+export DEPLOY_MODEL_S3_BUCKET=pdx-cluster-mount-2
 
 # Automatic fill
 export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)

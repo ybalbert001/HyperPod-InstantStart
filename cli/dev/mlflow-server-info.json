@@ -1,0 +1,17 @@
+{
+  "TrackingServerArn": "arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/hp-cluster-2-mlflow-server",
+  "TrackingServerName": "hp-cluster-2-mlflow-server",
+  "ArtifactStoreUri": "s3://pdx-cluster-mount-2",
+  "TrackingServerSize": "Small",
+  "MlflowVersion": "3.0.0",
+  "RoleArn": "arn:aws:iam::633205212955:role/smhp-admin-role-20250821-0359",
+  "TrackingServerStatus": "Created",
+  "IsActive": "Active",
+  "TrackingServerUrl": "https://t-b0idg1pqtvke.us-west-2.experiments.sagemaker.aws",
+  "WeeklyMaintenanceWindowStart": "Sat:15:13",
+  "AutomaticModelRegistration": false,
+  "CreationTime": "2025-08-21T04:36:07.067000+00:00",
+  "CreatedBy": {},
+  "LastModifiedTime": "2025-08-21T04:36:07.067000+00:00",
+  "LastModifiedBy": {}
+}
