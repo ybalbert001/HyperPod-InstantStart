@@ -1,15 +1,14 @@
-export CLUSTER_TAG=hypd-instrt-0821t1
-export AWS_REGION=us-west-2
+export CLOUD_FORMATION_FULL_STACK_NAME=test-stack-123
+export AWS_REGION=us-east-1
+export EKS_CLUSTER_NAME=test-eks
+export HP_CLUSTER_NAME=test-hp
 # export FTP_NAME=your-ftp-name
-export GPU_CAPACITY_AZ=us-west-2a
-export GPU_INSTANCE_TYPE=ml.g6.12xlarge
+export GPU_CAPACITY_AZ=us-east-1a
+export GPU_INSTANCE_TYPE=ml.g5.12xlarge
 export GPU_INSTANCE_COUNT=2
+export DEPLOY_MODEL_S3_BUCKET=test-bucket
 
 # Automatic fill
-export CLOUD_FORMATION_FULL_STACK_NAME=full-stack-$CLUSTER_TAG
-export EKS_CLUSTER_NAME=eks-cluster-$CLUSTER_TAG
-export HP_CLUSTER_NAME=hp-cluster-$CLUSTER_TAG
-export DEPLOY_MODEL_S3_BUCKET=cluster-mount-$CLUSTER_TAG
 export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 export STACK_ID=$CLOUD_FORMATION_FULL_STACK_NAME
 export AWS_AZ=$(aws ec2 describe-availability-zones --region $AWS_REGION --query "AvailabilityZones[?ZoneName=='$GPU_CAPACITY_AZ'].ZoneId" --output text)

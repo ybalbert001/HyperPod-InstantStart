@@ -2,8 +2,6 @@
 
 # Model Deployment UI 启动脚本
 
-./_setup.sh
-
 echo "🚀 Starting Model Deployment Management Dashboard..."
 
 # 检查Node.js版本
@@ -19,18 +17,18 @@ if [ "$NODE_VERSION" -lt 16 ]; then
 fi
 
 # 检查kubectl
-# if ! command -v kubectl &> /dev/null; then
-#     echo "❌ kubectl is not installed or not in PATH."
-#     exit 1
-# fi
+if ! command -v kubectl &> /dev/null; then
+    echo "❌ kubectl is not installed or not in PATH."
+    exit 1
+fi
 
-# # 测试kubectl连接
-# echo "🔍 Testing kubectl connection..."
-# if ! kubectl cluster-info &> /dev/null; then
-#     echo "❌ kubectl is not properly configured or cluster is not accessible."
-#     echo "Please run: kubectl cluster-info"
-#     exit 1
-# fi
+# 测试kubectl连接
+echo "🔍 Testing kubectl connection..."
+if ! kubectl cluster-info &> /dev/null; then
+    echo "❌ kubectl is not properly configured or cluster is not accessible."
+    echo "Please run: kubectl cluster-info"
+    exit 1
+fi
 
 echo "✅ kubectl connection successful"
 

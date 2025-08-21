@@ -41,23 +41,24 @@ const ClusterManagement = () => {
   const [cloudFormationStatus, setCloudFormationStatus] = useState(null);
   
   // 新增状态管理
+  const [statusPolling, setStatusPolling] = useState(false);
   const [step1Details, setStep1Details] = useState(null);
   const [step2Details, setStep2Details] = useState(null);
   const [logs, setLogs] = useState({ launch: '', configure: '' });
   const [logOffset, setLogOffset] = useState({ launch: 0, configure: 0 });
   const [activeLogTab, setActiveLogTab] = useState('launch');
-  
-  // 添加实时预览状态
-  const [previewClusterTag, setPreviewClusterTag] = useState(defaultConfig.clusterTag);
 
-  // 默认配置值 - 基于新的 init_envs 结构
+  // 默认配置值
   const defaultConfig = {
-    clusterTag: 'hypd-instrt-0821t1',
-    awsRegion: 'us-west-2',
+    cloudFormationFullStackName: 'hyperpod-instantstart-stack-0821',
+    awsRegion: 'us-east-1',
+    eksClusterName: 'eks-cluster-2',
+    hpClusterName: 'hp-cluster-2',
     ftpName: '',
-    gpuCapacityAz: 'us-west-2a',
-    gpuInstanceType: 'ml.g6.12xlarge',
-    gpuInstanceCount: 2
+    gpuCapacityAz: 'us-east-1a',
+    gpuInstanceType: 'ml.g5.12xlarge',
+    gpuInstanceCount: 2,
+    deployModelS3Bucket: 'pdx-cluster-mount-2'
   };
 
   useEffect(() => {
@@ -120,13 +121,24 @@ const ClusterManagement = () => {
     }
   };
 
-  // 手动刷新状态和日志
+  // 定期检查状态和日志
+  useEffect(() => {
+    if (statusPolling) {
+      const interval = setInterval(() => {
+        checkStepStatus();
+        fetchLogs('launch');
+        fetchLogs('configure');
+      }, 10000); // 10秒检查一次
+      
+      return () => clearInterval(interval);
+    }
+  }, [statusPolling, logOffset]);
+
+  // 手动刷新状态
   const refreshStatus = () => {
-    setLoading(true);
     checkStepStatus();
     fetchLogs('launch');
     fetchLogs('configure');
-    setTimeout(() => setLoading(false), 1000); // 给用户一个加载反馈
   };
 
   // 保存配置到 init_envs
@@ -163,6 +175,7 @@ const ClusterManagement = () => {
   const executeStep1 = async () => {
     setLoading(true);
     setStep1Status('process');
+    setStatusPolling(true); // 开始状态轮询
     
     try {
       const response = await fetch('/api/cluster/launch', {
@@ -175,15 +188,17 @@ const ClusterManagement = () => {
       const result = await response.json();
       
       if (result.success) {
-        message.success('Cluster launch started in background. Use "Refresh Status" to check progress.');
-        // 立即检查一次状态
+        message.success('Cluster launch started in background');
+        // 立即开始检查状态
         setTimeout(checkStepStatus, 2000);
       } else {
         setStep1Status('error');
+        setStatusPolling(false);
         message.error(`Cluster launch failed: ${result.error}`);
       }
     } catch (error) {
       setStep1Status('error');
+      setStatusPolling(false);
       message.error(`Error launching cluster: ${error.message}`);
     } finally {
       setLoading(false);
@@ -291,6 +306,10 @@ const ClusterManagement = () => {
 
   return (
     <div style={{ padding: '24px' }}>
+      <Title level={2}>
+        <CloudServerOutlined style={{ marginRight: '8px' }} />
+        Cluster Management
+      </Title>
       
       <Row gutter={[24, 24]} style={{ display: 'flex', alignItems: 'stretch' }}>
         {/* 左侧：配置表单 */}
@@ -304,24 +323,36 @@ const ClusterManagement = () => {
                 initialValues={defaultConfig}
                 style={{ height: '100%', overflowY: 'auto', overflowX: 'hidden' }}
               >
-              {/* 第一行：Cluster Tag - 核心字段 */}
+              {/* 第一行：CloudFormation Stack Name */}
               <Form.Item
-                label="Cluster Tag"
-                name="clusterTag"
-                rules={[{ required: true, message: 'Please enter cluster tag' }]}
-                extra="This tag will be used to generate all resource names automatically"
+                label="CloudFormation Stack Name"
+                name="cloudFormationFullStackName"
+                rules={[{ required: true, message: 'Please enter stack name' }]}
               >
-                <Input placeholder="hypd-instrt-0821t1" />
+                <Input placeholder="hyperpod-instantstart-stack-0821" />
               </Form.Item>
 
-              {/* 第二行：AWS Region */}
-              <Form.Item
-                label="AWS Region"
-                name="awsRegion"
-                rules={[{ required: true, message: 'Please enter AWS region' }]}
-              >
-                <Input placeholder="us-west-2" />
-              </Form.Item>
+              {/* 第二行：两个 Cluster 名称 */}
+              <Row gutter={12} style={{ margin: 0 }}>
+                <Col span={12} style={{ paddingLeft: 0, paddingRight: 6 }}>
+                  <Form.Item
+                    label="EKS Cluster Name"
+                    name="eksClusterName"
+                    rules={[{ required: true, message: 'Please enter EKS cluster name' }]}
+                  >
+                    <Input placeholder="eks-cluster-2" />
+                  </Form.Item>
+                </Col>
+                <Col span={12} style={{ paddingLeft: 6, paddingRight: 0 }}>
+                  <Form.Item
+                    label="HyperPod Cluster Name"
+                    name="hpClusterName"
+                    rules={[{ required: true, message: 'Please enter HyperPod cluster name' }]}
+                  >
+                    <Input placeholder="hp-cluster-2" />
+                  </Form.Item>
+                </Col>
+              </Row>
 
               {/* 第三行：FTP 配置 */}
               <Row gutter={12} style={{ margin: 0 }}>
@@ -350,14 +381,27 @@ const ClusterManagement = () => {
                 </Col>
               </Row>
 
-              {/* 第四行：GPU 配置 */}
-              <Form.Item
-                label="GPU Capacity AZ"
-                name="gpuCapacityAz"
-                rules={[{ required: true, message: 'Please enter availability zone' }]}
-              >
-                <Input placeholder="us-west-2a" />
-              </Form.Item>
+              {/* 第四行：Region 和 GPU AZ */}
+              <Row gutter={12} style={{ margin: 0 }}>
+                <Col span={12} style={{ paddingLeft: 0, paddingRight: 6 }}>
+                  <Form.Item
+                    label="AWS Region"
+                    name="awsRegion"
+                    rules={[{ required: true, message: 'Please enter AWS region' }]}
+                  >
+                    <Input placeholder="us-east-1" />
+                  </Form.Item>
+                </Col>
+                <Col span={12} style={{ paddingLeft: 6, paddingRight: 0 }}>
+                  <Form.Item
+                    label="GPU Capacity AZ"
+                    name="gpuCapacityAz"
+                    rules={[{ required: true, message: 'Please enter availability zone' }]}
+                  >
+                    <Input placeholder="us-east-1a" />
+                  </Form.Item>
+                </Col>
+              </Row>
 
               {/* 第五行：GPU Instance 配置 */}
               <Row gutter={12} style={{ margin: 0 }}>
@@ -367,7 +411,7 @@ const ClusterManagement = () => {
                     name="gpuInstanceType"
                     rules={[{ required: true, message: 'Please enter GPU instance type' }]}
                   >
-                    <Input placeholder="ml.g6.12xlarge" />
+                    <Input placeholder="ml.g5.12xlarge" />
                   </Form.Item>
                 </Col>
                 <Col span={8} style={{ paddingLeft: 6, paddingRight: 0 }}>
@@ -381,23 +425,14 @@ const ClusterManagement = () => {
                 </Col>
               </Row>
 
-              {/* 自动生成的资源名称预览 */}
-              <Divider orientation="left" style={{ fontSize: '14px', margin: '16px 0 8px 0' }}>
-                Auto-generated Resource Names
-              </Divider>
-              
-              <div style={{ 
-                background: '#f5f5f5', 
-                padding: '12px', 
-                borderRadius: '6px', 
-                fontSize: '12px',
-                marginBottom: '16px'
-              }}>
-                <div><strong>CloudFormation Stack:</strong> full-stack-{previewClusterTag}</div>
-                <div><strong>EKS Cluster:</strong> eks-cluster-{previewClusterTag}</div>
-                <div><strong>HyperPod Cluster:</strong> hp-cluster-{previewClusterTag}</div>
-                <div><strong>S3 Bucket:</strong> cluster-mount-{previewClusterTag}</div>
-              </div>
+              {/* 第六行：S3 Bucket */}
+              <Form.Item
+                label="Deploy Model S3 Bucket"
+                name="deployModelS3Bucket"
+                rules={[{ required: true, message: 'Please enter S3 bucket name' }]}
+              >
+                <Input placeholder="pdx-cluster-mount-2" />
+              </Form.Item>
 
               <Form.Item>
                 <Button type="primary" htmlType="submit" size="large" block>
@@ -411,22 +446,7 @@ const ClusterManagement = () => {
 
         {/* 中间：执行步骤和状态 */}
         <Col xs={24} lg={8} style={{ display: 'flex' }}>
-          <Card 
-            title="Deployment Steps" 
-            className="theme-card analytics" 
-            style={{ width: '100%', display: 'flex', flexDirection: 'column' }}
-            extra={
-              <Button 
-                type="text" 
-                icon={<ReloadOutlined />} 
-                onClick={refreshStatus}
-                loading={loading}
-                size="small"
-              >
-                Refresh Status
-              </Button>
-            }
-          >
+          <Card title="Deployment Steps" className="theme-card analytics" style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
             <div style={{ flex: 1, overflow: 'auto' }}>
             <Steps
               current={currentStep}
@@ -550,14 +570,16 @@ const ClusterManagement = () => {
             className="theme-card storage"
             style={{ width: '100%', display: 'flex', flexDirection: 'column' }}
             extra={
-              <Button 
-                size="small" 
-                icon={<ReloadOutlined />}
-                onClick={refreshStatus}
-                loading={loading}
-              >
-                Refresh
-              </Button>
+              <Space>
+                <Button 
+                  size="small" 
+                  icon={<ReloadOutlined />}
+                  onClick={refreshStatus}
+                >
+                  Refresh
+                </Button>
+                {statusPolling && <Spin size="small" />}
+              </Space>
             }
           >
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -618,7 +640,7 @@ const ClusterManagement = () => {
                 <Space size="small" style={{ fontSize: '9px' }}>
                   {activeLogTab === 'launch' ? getStatusTag(step1Status) : getStatusTag(step2Status)}
                   <span>•</span>
-                  <span>Manual Refresh</span>
+                  <span>{statusPolling ? 'Auto 10s' : 'Manual'}</span>
                   <span>•</span>
                   <span>{new Date().toLocaleTimeString().slice(0, 5)}</span>
                 </Space>
