@@ -2772,18 +2772,19 @@ app.post('/api/cluster/save-config', async (req, res) => {
     const config = req.body;
     console.log('Saving cluster configuration:', config);
 
-    // 构建环境变量内容
-    const envContent = `export CLOUD_FORMATION_FULL_STACK_NAME=${config.cloudFormationFullStackName}
+    // 构建环境变量内容 - 基于新的 init_envs 结构
+    const envContent = `export CLUSTER_TAG=${config.clusterTag}
 export AWS_REGION=${config.awsRegion}
-export EKS_CLUSTER_NAME=${config.eksClusterName}
-export HP_CLUSTER_NAME=${config.hpClusterName}
 ${config.enableFtp && config.ftpName ? `export FTP_NAME=${config.ftpName}` : '# export FTP_NAME=your-ftp-name'}
 export GPU_CAPACITY_AZ=${config.gpuCapacityAz}
 export GPU_INSTANCE_TYPE=${config.gpuInstanceType}
 export GPU_INSTANCE_COUNT=${config.gpuInstanceCount}
-export DEPLOY_MODEL_S3_BUCKET=${config.deployModelS3Bucket}
 
 # Automatic fill
+export CLOUD_FORMATION_FULL_STACK_NAME=full-stack-$CLUSTER_TAG
+export EKS_CLUSTER_NAME=eks-cluster-$CLUSTER_TAG
+export HP_CLUSTER_NAME=hp-cluster-$CLUSTER_TAG
+export DEPLOY_MODEL_S3_BUCKET=cluster-mount-$CLUSTER_TAG
 export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 export STACK_ID=$CLOUD_FORMATION_FULL_STACK_NAME
 export AWS_AZ=$(aws ec2 describe-availability-zones --region $AWS_REGION --query "AvailabilityZones[?ZoneName=='$GPU_CAPACITY_AZ'].ZoneId" --output text)`;
@@ -3235,57 +3236,6 @@ async function checkStep2Status() {
     return { status: 'error', error: error.message };
   }
 }
-
-// 保存集群配置到 init_envs 文件
-app.post('/api/cluster/save-config', async (req, res) => {
-  try {
-    const config = req.body;
-    console.log('Saving cluster configuration:', config);
-
-    // 构建环境变量内容
-    const envContent = `export CLOUD_FORMATION_FULL_STACK_NAME=${config.cloudFormationFullStackName}
-export AWS_REGION=${config.awsRegion}
-export EKS_CLUSTER_NAME=${config.eksClusterName}
-export HP_CLUSTER_NAME=${config.hpClusterName}
-${config.enableFtp && config.ftpName ? `export FTP_NAME=${config.ftpName}` : '# export FTP_NAME=your-ftp-name'}
-export GPU_CAPACITY_AZ=${config.gpuCapacityAz}
-export GPU_INSTANCE_TYPE=${config.gpuInstanceType}
-export GPU_INSTANCE_COUNT=${config.gpuInstanceCount}
-export DEPLOY_MODEL_S3_BUCKET=${config.deployModelS3Bucket}
-
-# Automatic fill
-export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-export STACK_ID=$CLOUD_FORMATION_FULL_STACK_NAME
-export AWS_AZ=$(aws ec2 describe-availability-zones --region $AWS_REGION --query "AvailabilityZones[?ZoneName=='$GPU_CAPACITY_AZ'].ZoneId" --output text)`;
-
-    const initEnvsPath = path.join(__dirname, '../../cli/init_envs');
-    
-    // 备份原文件
-    if (fs.existsSync(initEnvsPath)) {
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const backupPath = `${initEnvsPath}.backup.${timestamp}`;
-      await fs.copy(initEnvsPath, backupPath);
-      console.log(`Backed up original init_envs to: ${backupPath}`);
-    }
-
-    // 写入新配置
-    await fs.writeFile(initEnvsPath, envContent);
-    console.log('Configuration saved successfully');
-
-    res.json({
-      success: true,
-      message: 'Configuration saved successfully',
-      backupCreated: true
-    });
-
-  } catch (error) {
-    console.error('Error saving cluster configuration:', error);
-    res.json({
-      success: false,
-      error: error.message
-    });
-  }
-});
 
 // 执行集群启动脚本 (Step 1) - 使用 nohup 后台执行
 app.post('/api/cluster/launch', async (req, res) => {
