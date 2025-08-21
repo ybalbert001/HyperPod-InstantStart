@@ -8,7 +8,8 @@
 
 source init_envs
 
-./fetch-mlflow-server-info.sh
+./fetch-mlflow-server-info.sh &
+../ui-panel/setup.sh &
 
 execute_aws_command() {
     local command="$1"
