@@ -260,7 +260,7 @@ class MultiClusterStatus {
   // 检查 S3 CSI Node Pods
   checkS3CSINodes() {
     return new Promise((resolve) => {
-      exec('kubectl get pods -n kube-system -l app=s3-csi-node -o json', (error, stdout, stderr) => {
+      exec('kubectl get pods -n kube-system -l app=s3-csi-node --no-headers', (error, stdout, stderr) => {
         if (error) {
           resolve({
             name: 's3-csi-node',
@@ -271,54 +271,51 @@ class MultiClusterStatus {
           return;
         }
 
-        try {
-          const result = JSON.parse(stdout);
-          const pods = result.items || [];
-          
-          if (pods.length === 0) {
-            resolve({
-              name: 's3-csi-node',
-              status: 'missing',
-              message: 'No S3 CSI node pods found',
-              details: { totalPods: 0, runningPods: 0, readyPods: 0 }
-            });
-            return;
-          }
-
-          const runningPods = pods.filter(pod => pod.status?.phase === 'Running');
-          const readyPods = pods.filter(pod => {
-            const conditions = pod.status?.conditions || [];
-            return conditions.some(condition => 
-              condition.type === 'Ready' && condition.status === 'True'
-            );
-          });
-
-          const status = readyPods.length === pods.length ? 'ready' : 'not_ready';
-          
+        const lines = stdout.trim().split('\n').filter(line => line.trim());
+        
+        if (lines.length === 0) {
           resolve({
             name: 's3-csi-node',
-            status: status === 'ready' ? 'ready' : 'partial',
-            message: `${readyPods.length}/${pods.length} S3 CSI node pods ready`,
-            details: {
-              totalPods: pods.length,
-              runningPods: runningPods.length,
-              readyPods: readyPods.length,
-              pods: pods.map(pod => ({
-                name: pod.metadata.name,
-                phase: pod.status?.phase,
-                ready: pod.status?.conditions?.some(c => c.type === 'Ready' && c.status === 'True') || false
-              }))
-            }
+            status: 'missing',
+            message: 'No S3 CSI node pods found',
+            details: { totalPods: 0, runningPods: 0, readyPods: 0 }
           });
-
-        } catch (parseError) {
-          resolve({
-            name: 's3-csi-node',
-            status: 'error',
-            message: `Failed to parse S3 CSI nodes response: ${parseError.message}`,
-            details: null
-          });
+          return;
         }
+
+        let runningPods = 0;
+        let readyPods = 0;
+        
+        lines.forEach(line => {
+          const parts = line.split(/\s+/);
+          if (parts.length >= 3) {
+            const status = parts[2]; // STATUS column
+            const ready = parts[1];  // READY column (e.g., "1/1")
+            
+            if (status === 'Running') {
+              runningPods++;
+            }
+            
+            // Check if ready (e.g., "1/1" means ready)
+            const [readyCount, totalCount] = ready.split('/').map(n => parseInt(n));
+            if (readyCount === totalCount && readyCount > 0) {
+              readyPods++;
+            }
+          }
+        });
+
+        const status = readyPods === lines.length ? 'ready' : 'partial';
+        
+        resolve({
+          name: 's3-csi-node',
+          status,
+          message: `${readyPods}/${lines.length} S3 CSI node pods ready`,
+          details: {
+            totalPods: lines.length,
+            runningPods: runningPods,
+            readyPods: readyPods
+          }
+        });
       });
     });
   }
@@ -326,60 +323,63 @@ class MultiClusterStatus {
   // 检查 HyperPod Training Operator
   checkHyperPodOperator() {
     return new Promise((resolve) => {
-      exec('kubectl get pods -A -l app.kubernetes.io/name=hp-training-operator -o json', (error, stdout, stderr) => {
-        if (error) {
+      // 根据实际输出，使用更通用的搜索
+      exec('kubectl get pods -A --no-headers | grep -E "training-operator|hp-training"', (error, stdout, stderr) => {
+        if (error || !stdout.trim()) {
           resolve({
             name: 'hp-training-operator',
-            status: 'error',
-            message: `Failed to check HyperPod operator: ${error.message}`,
-            details: null
+            status: 'missing',
+            message: 'HyperPod training operator not found',
+            details: { totalPods: 0 }
           });
           return;
         }
 
-        try {
-          const result = JSON.parse(stdout);
-          const pods = result.items || [];
-          
-          if (pods.length === 0) {
-            resolve({
-              name: 'hp-training-operator',
-              status: 'missing',
-              message: 'HyperPod training operator not found',
-              details: { totalPods: 0 }
-            });
-            return;
-          }
-
-          const runningPods = pods.filter(pod => pod.status?.phase === 'Running');
-          const readyPods = pods.filter(pod => {
-            const conditions = pod.status?.conditions || [];
-            return conditions.some(condition => 
-              condition.type === 'Ready' && condition.status === 'True'
-            );
-          });
-
-          const status = readyPods.length > 0 ? 'ready' : 'not_ready';
-          
+        const lines = stdout.trim().split('\n').filter(line => line.trim());
+        
+        if (lines.length === 0) {
           resolve({
             name: 'hp-training-operator',
-            status: status === 'ready' ? 'ready' : 'partial',
-            message: `${readyPods.length}/${pods.length} HyperPod operator pods ready`,
-            details: {
-              totalPods: pods.length,
-              runningPods: runningPods.length,
-              readyPods: readyPods.length
-            }
+            status: 'missing',
+            message: 'HyperPod training operator not found',
+            details: { totalPods: 0 }
           });
-
-        } catch (parseError) {
-          resolve({
-            name: 'hp-training-operator',
-            status: 'error',
-            message: `Failed to parse HyperPod operator response: ${parseError.message}`,
-            details: null
-          });
+          return;
         }
+
+        let runningPods = 0;
+        let readyPods = 0;
+        
+        lines.forEach(line => {
+          const parts = line.split(/\s+/);
+          if (parts.length >= 4) {
+            const status = parts[3]; // STATUS column
+            const ready = parts[2];  // READY column
+            
+            if (status === 'Running') {
+              runningPods++;
+            }
+            
+            // Check if ready
+            const [readyCount, totalCount] = ready.split('/').map(n => parseInt(n));
+            if (readyCount === totalCount && readyCount > 0) {
+              readyPods++;
+            }
+          }
+        });
+
+        const status = readyPods > 0 ? 'ready' : 'partial';
+        
+        resolve({
+          name: 'hp-training-operator',
+          status,
+          message: `${readyPods}/${lines.length} HyperPod operator pods ready`,
+          details: {
+            totalPods: lines.length,
+            runningPods: runningPods,
+            readyPods: readyPods
+          }
+        });
       });
     });
   }
@@ -387,7 +387,7 @@ class MultiClusterStatus {
   // 检查 Controller Manager
   checkControllerManager() {
     return new Promise((resolve) => {
-      exec('kubectl get pods -A -o name | grep -E "hp-training-controller-manager|training-operator"', (error, stdout, stderr) => {
+      exec('kubectl get pods -A --no-headers | grep -E "hp-training-controller-manager|training-operator"', (error, stdout, stderr) => {
         if (error || !stdout.trim()) {
           resolve({
             name: 'controller-manager',
@@ -398,14 +398,49 @@ class MultiClusterStatus {
           return;
         }
 
-        const podNames = stdout.trim().split('\n').filter(name => name.trim());
+        const lines = stdout.trim().split('\n').filter(line => line.trim());
+        
+        if (lines.length === 0) {
+          resolve({
+            name: 'controller-manager',
+            status: 'missing',
+            message: 'Controller manager not found',
+            details: null
+          });
+          return;
+        }
+
+        let runningPods = 0;
+        let readyPods = 0;
+        
+        lines.forEach(line => {
+          const parts = line.split(/\s+/);
+          if (parts.length >= 4) {
+            const status = parts[3]; // STATUS column
+            const ready = parts[2];  // READY column
+            
+            if (status === 'Running') {
+              runningPods++;
+            }
+            
+            // Check if ready
+            const [readyCount, totalCount] = ready.split('/').map(n => parseInt(n));
+            if (readyCount === totalCount && readyCount > 0) {
+              readyPods++;
+            }
+          }
+        });
+
+        const status = readyPods > 0 ? 'ready' : 'partial';
         
         resolve({
           name: 'controller-manager',
-          status: podNames.length > 0 ? 'ready' : 'missing',
-          message: `Found ${podNames.length} controller manager pod(s)`,
+          status,
+          message: `Found ${readyPods}/${lines.length} controller manager pod(s) ready`,
           details: {
-            podNames: podNames
+            totalPods: lines.length,
+            runningPods: runningPods,
+            readyPods: readyPods
           }
         });
       });
