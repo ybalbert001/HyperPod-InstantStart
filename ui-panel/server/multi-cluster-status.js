@@ -165,9 +165,7 @@ class MultiClusterStatus {
       }
 
       // 首先检查是否有 Step2 的执行记录（日志文件）
-      const metadataDir = this.clusterManager.getClusterMetadataDir(clusterTag);
-      const logsDir = path.join(metadataDir, 'logs');
-      const currentDir = path.join(logsDir, 'current');
+      const currentDir = this.clusterManager.getClusterCurrentDir(clusterTag);
       const step2LogFile = path.join(currentDir, 'configure.log');
       const step2LogExists = fs.existsSync(step2LogFile);
       
