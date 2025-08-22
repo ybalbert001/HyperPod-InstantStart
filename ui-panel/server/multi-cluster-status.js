@@ -442,6 +442,41 @@ class MultiClusterStatus {
       });
     }
   }
+
+  // 处理 CloudFormation 状态请求
+  async handleCloudFormationStatus(req, res) {
+    try {
+      const activeCluster = this.clusterManager.getActiveCluster();
+      
+      if (!activeCluster) {
+        return res.json({
+          success: false,
+          error: 'No active cluster found'
+        });
+      }
+
+      // 使用 Step1 状态检查，它包含了 CloudFormation 状态
+      const step1Status = await this.checkStep1Status(activeCluster);
+      
+      res.json({
+        success: true,
+        data: {
+          stackName: step1Status.stackName,
+          status: step1Status.status,
+          message: step1Status.message,
+          details: step1Status.details,
+          clusterTag: activeCluster
+        }
+      });
+
+    } catch (error) {
+      console.error('Error checking CloudFormation status:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  }
 }
 
 module.exports = MultiClusterStatus;

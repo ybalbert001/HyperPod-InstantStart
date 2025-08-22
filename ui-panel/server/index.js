@@ -3255,36 +3255,6 @@ app.get('/api/cluster/mlflow-info', (req, res) => {
 // 清除状态缓存 API
 
 // 获取 Step 1 状态 API
-app.get('/api/cluster/step1-status', async (req, res) => {
-  try {
-    const status = await checkStep1Status();
-    res.json({
-      success: true,
-      data: status
-    });
-  } catch (error) {
-    res.json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// 获取 Step 2 状态 API
-app.get('/api/cluster/step2-status', async (req, res) => {
-  try {
-    const status = await checkStep2Status();
-    res.json({
-      success: true,
-      data: status
-    });
-  } catch (error) {
-    res.json({
-      success: false,
-      error: error.message
-    });
-  }
-});
 
 // 获取日志内容 API
 app.get('/api/cluster/logs/:step', (req, res) => {
@@ -3360,116 +3330,6 @@ app.get('/api/cluster/logs-history', (req, res) => {
 });
 
 // 获取 CloudFormation 堆栈状态 - 从 init_envs 自动读取堆栈名称
-app.get('/api/cluster/cloudformation-status', async (req, res) => {
-  try {
-    // 使用多集群管理器获取活跃集群的配置
-    const ClusterManager = require('./cluster-manager');
-    const clusterManager = new ClusterManager();
-    const activeCluster = clusterManager.getActiveCluster();
-    
-    if (!activeCluster) {
-      return res.json({
-        success: false,
-        error: 'No active cluster found'
-      });
-    }
-
-    // 从活跃集群的配置文件读取堆栈名称
-    const configDir = clusterManager.getClusterConfigDir(activeCluster);
-    const initEnvsPath = path.join(configDir, 'init_envs');
-    
-    if (!fs.existsSync(initEnvsPath)) {
-      return res.json({
-        success: false,
-        error: `init_envs file not found for cluster: ${activeCluster}`
-      });
-    }
-
-    const envContent = fs.readFileSync(initEnvsPath, 'utf8');
-    const stackNameMatch = envContent.match(/export CLOUD_FORMATION_FULL_STACK_NAME=(.+)/);
-    
-    if (!stackNameMatch) {
-      return res.json({
-        success: false,
-        error: 'CLOUD_FORMATION_FULL_STACK_NAME not found in init_envs'
-      });
-    }
-
-    let stackName = stackNameMatch[1].trim();
-    
-    // 处理变量替换
-    if (stackName.includes('$CLUSTER_TAG')) {
-      stackName = stackName.replace('$CLUSTER_TAG', activeCluster);
-    }
-    
-    console.log(`Getting CloudFormation status for cluster ${activeCluster}, stack: ${stackName}`);
-    
-    const command = `aws cloudformation describe-stacks --stack-name "${stackName}" --output json`;
-    
-    exec(command, { timeout: 30000 }, (error, stdout, stderr) => {
-      if (error) {
-        console.error('CloudFormation status error:', error);
-        
-        // 检查是否是堆栈不存在的错误
-        if (stderr.includes('does not exist')) {
-          return res.json({
-            success: true,
-            data: {
-              StackStatus: 'STACK_NOT_EXISTS',
-              StackName: stackName,
-              ClusterTag: activeCluster
-            }
-          });
-        }
-        
-        return res.json({
-          success: false,
-          error: error.message,
-          stderr: stderr,
-          clusterTag: activeCluster
-        });
-      }
-
-      try {
-        const result = JSON.parse(stdout);
-        if (result.Stacks && result.Stacks.length > 0) {
-          const stack = result.Stacks[0];
-          res.json({
-            success: true,
-            data: {
-              StackName: stack.StackName,
-              StackStatus: stack.StackStatus,
-              CreationTime: stack.CreationTime,
-              LastUpdatedTime: stack.LastUpdatedTime,
-              StackStatusReason: stack.StackStatusReason,
-              ClusterTag: activeCluster
-            }
-          });
-        } else {
-          res.json({
-            success: false,
-            error: 'Stack not found',
-            clusterTag: activeCluster
-          });
-        }
-      } catch (parseError) {
-        console.error('Error parsing CloudFormation response:', parseError);
-        res.json({
-          success: false,
-          error: 'Failed to parse CloudFormation response',
-          clusterTag: activeCluster
-        });
-      }
-    });
-
-  } catch (error) {
-    console.error('Error getting CloudFormation status:', error);
-    res.json({
-      success: false,
-      error: error.message
-    });
-  }
-});
 // ==================== 多集群管理 API ====================
 // 引入多集群管理模块
 const MultiClusterAPIs = require('./multi-cluster-apis');
@@ -3494,6 +3354,7 @@ app.post('/api/cluster/clear-status-cache', (req, res) => multiClusterAPIs.handl
 // 重写状态检查API以支持多集群
 app.get('/api/cluster/step1-status', (req, res) => multiClusterStatus.handleStep1Status(req, res));
 app.get('/api/cluster/step2-status', (req, res) => multiClusterStatus.handleStep2Status(req, res));
+app.get('/api/cluster/cloudformation-status', (req, res) => multiClusterStatus.handleCloudFormationStatus(req, res));
 
 console.log('Multi-cluster management APIs loaded');
 

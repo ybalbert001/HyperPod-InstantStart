@@ -73,10 +73,10 @@ const ClusterManagement = () => {
 
   // 默认配置值 - 基于新的 init_envs 结构 - 移到最前面
   const defaultConfig = {
-    clusterTag: 'hypd-instrt-0821t1',
+    clusterTag: 'hypd-instrt-0801',
     awsRegion: 'us-west-2',
     ftpName: '',
-    gpuCapacityAz: 'us-west-2a',
+    gpuCapacityAz: 'us-west-2c',
     gpuInstanceType: 'ml.g6.12xlarge',
     gpuInstanceCount: 2
   };
@@ -267,8 +267,16 @@ const ClusterManagement = () => {
         // 1. 获取集群列表
         await fetchClusters();
         
-        // 暂时禁用自动状态检查，避免循环
-        // await refreshAllStatus(false);
+        // 2. 检查当前状态，恢复按钮状态
+        setTimeout(async () => {
+          try {
+            await refreshAllStatus(false); // 不显示成功消息
+            console.log('ClusterManagement: Initial status check completed');
+          } catch (error) {
+            console.error('Error during initial status check:', error);
+          }
+        }, 1000); // 给集群列表加载一些时间
+        
         console.log('ClusterManagement: Initialization completed');
       } catch (error) {
         console.error('Failed to initialize component:', error);
@@ -447,10 +455,14 @@ const ClusterManagement = () => {
       if (result.success) {
         message.success('Cluster launch started in background. Use "Refresh Status" to check progress.');
         
-        // 2秒后进行完整的状态刷新（包含状态检查）
-        setTimeout(() => {
-          refreshAllStatus(false); // 不显示成功消息，包含了 checkStepStatus
-        }, 2000);
+        // 立即进行一次快速状态检查，然后再进行完整刷新
+        setTimeout(async () => {
+          try {
+            await refreshAllStatus(false); // 完整刷新，包含状态检查
+          } catch (error) {
+            console.error('Error during post-launch refresh:', error);
+          }
+        }, 1500); // 1.5秒后刷新，给API一些处理时间
       } else {
         setStep1Status('error');
         message.error(`Cluster launch failed: ${result.error}`);
@@ -459,7 +471,8 @@ const ClusterManagement = () => {
       setStep1Status('error');
       message.error(`Error launching cluster: ${error.message}`);
     } finally {
-      setLoading(false);
+      // 延迟设置 loading 为 false，避免与刷新冲突
+      setTimeout(() => setLoading(false), 500);
     }
   };
 
@@ -481,10 +494,14 @@ const ClusterManagement = () => {
       if (result.success) {
         message.success('Cluster configuration started in background');
         
-        // 2秒后进行完整的状态刷新（包含状态检查）
-        setTimeout(() => {
-          refreshAllStatus(false); // 不显示成功消息，包含了 checkStepStatus
-        }, 2000);
+        // 立即进行完整状态刷新
+        setTimeout(async () => {
+          try {
+            await refreshAllStatus(false); // 完整刷新，包含状态检查
+          } catch (error) {
+            console.error('Error during post-configure refresh:', error);
+          }
+        }, 1500); // 1.5秒后刷新
       } else {
         setStep2Status('error');
         message.error(`Cluster configuration failed: ${result.error}`);
@@ -493,7 +510,8 @@ const ClusterManagement = () => {
       setStep2Status('error');
       message.error(`Error configuring cluster: ${error.message}`);
     } finally {
-      setLoading(false);
+      // 延迟设置 loading 为 false，避免与刷新冲突
+      setTimeout(() => setLoading(false), 500);
     }
   };
 
