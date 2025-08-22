@@ -446,8 +446,11 @@ const ClusterManagement = () => {
       
       if (result.success) {
         message.success('Cluster launch started in background. Use "Refresh Status" to check progress.');
-        // 立即检查一次状态
-        setTimeout(checkStepStatus, 2000);
+        
+        // 2秒后进行完整的状态刷新（包含状态检查）
+        setTimeout(() => {
+          refreshAllStatus(false); // 不显示成功消息，包含了 checkStepStatus
+        }, 2000);
       } else {
         setStep1Status('error');
         message.error(`Cluster launch failed: ${result.error}`);
@@ -477,8 +480,11 @@ const ClusterManagement = () => {
       
       if (result.success) {
         message.success('Cluster configuration started in background');
-        // 立即开始检查状态
-        setTimeout(checkStepStatus, 2000);
+        
+        // 2秒后进行完整的状态刷新（包含状态检查）
+        setTimeout(() => {
+          refreshAllStatus(false); // 不显示成功消息，包含了 checkStepStatus
+        }, 2000);
       } else {
         setStep2Status('error');
         message.error(`Cluster configuration failed: ${result.error}`);

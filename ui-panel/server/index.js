@@ -2847,56 +2847,6 @@ app.get('/api/s3-storage', async (req, res) => {
 // ==================== 集群管理 API ====================
 
 // 保存集群配置到 init_envs 文件
-app.post('/api/cluster/save-config', async (req, res) => {
-  try {
-    const config = req.body;
-    console.log('Saving cluster configuration:', config);
-
-    // 构建环境变量内容 - 基于新的 init_envs 结构
-    const envContent = `export CLUSTER_TAG=${config.clusterTag}
-export AWS_REGION=${config.awsRegion}
-${config.enableFtp && config.ftpName ? `export FTP_NAME=${config.ftpName}` : '# export FTP_NAME=your-ftp-name'}
-export GPU_CAPACITY_AZ=${config.gpuCapacityAz}
-export GPU_INSTANCE_TYPE=${config.gpuInstanceType}
-export GPU_INSTANCE_COUNT=${config.gpuInstanceCount}
-
-# Automatic fill
-export CLOUD_FORMATION_FULL_STACK_NAME=full-stack-$CLUSTER_TAG
-export EKS_CLUSTER_NAME=eks-cluster-$CLUSTER_TAG
-export HP_CLUSTER_NAME=hp-cluster-$CLUSTER_TAG
-export DEPLOY_MODEL_S3_BUCKET=cluster-mount-$CLUSTER_TAG
-export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-export STACK_ID=$CLOUD_FORMATION_FULL_STACK_NAME
-export AWS_AZ=$(aws ec2 describe-availability-zones --region $AWS_REGION --query "AvailabilityZones[?ZoneName=='$GPU_CAPACITY_AZ'].ZoneId" --output text)`;
-
-    const initEnvsPath = path.join(__dirname, '../../cli/init_envs');
-    
-    // 备份原文件
-    if (fs.existsSync(initEnvsPath)) {
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const backupPath = `${initEnvsPath}.backup.${timestamp}`;
-      await fs.copy(initEnvsPath, backupPath);
-      console.log(`Backed up original init_envs to: ${backupPath}`);
-    }
-
-    // 写入新配置
-    await fs.writeFile(initEnvsPath, envContent);
-    console.log('Configuration saved successfully');
-
-    res.json({
-      success: true,
-      message: 'Configuration saved successfully',
-      backupCreated: true
-    });
-
-  } catch (error) {
-    console.error('Error saving cluster configuration:', error);
-    res.json({
-      success: false,
-      error: error.message
-    });
-  }
-});
 
 // 执行集群配置脚本 (Step 2)
 // ==================== 集群管理 API ====================
@@ -3257,56 +3207,6 @@ async function checkStep2Status() {
 }
 
 // 执行集群配置脚本 (Step 2) - 使用 nohup 后台执行
-app.post('/api/cluster/configure', async (req, res) => {
-  try {
-    console.log('Configuring cluster (Step 2) in background...');
-    
-    const cliPath = path.join(__dirname, '../../cli');
-    const scriptPath = path.join(cliPath, '2-cluster-configs.sh');
-    
-    // 检查脚本是否存在
-    if (!fs.existsSync(scriptPath)) {
-      throw new Error(`Script not found: ${scriptPath}`);
-    }
-
-    // 清除 Step 2 状态缓存，因为我们即将重新配置
-    const step2CacheFile = path.join(logManager.metadataDir, 'step2_status_cache.json');
-    if (fs.existsSync(step2CacheFile)) {
-      fs.unlinkSync(step2CacheFile);
-      console.log('Cleared Step 2 status cache before reconfiguration');
-    }
-
-    // 创建日志文件
-    const { logFilePath, logId } = logManager.createLogFile('configure');
-    
-    // 使用 nohup 后台执行
-    const command = `cd "${cliPath}" && nohup bash 2-cluster-configs.sh > "${logFilePath}" 2>&1 &`;
-    
-    exec(command, (error) => {
-      if (error) {
-        console.error('Failed to start script:', error);
-        logManager.updateStatus('configure', 'failed');
-      }
-    });
-    
-    // 立即返回，不等待脚本完成
-    logManager.updateStatus('configure', 'started');
-    
-    res.json({
-      success: true,
-      message: 'Cluster configuration started in background',
-      logId: logId,
-      status: 'started'
-    });
-
-  } catch (error) {
-    console.error('Error configuring cluster:', error);
-    res.json({
-      success: false,
-      error: error.message
-    });
-  }
-});
 
 // 获取 MLFlow 服务器信息 API - 支持多集群
 app.get('/api/cluster/mlflow-info', (req, res) => {
@@ -3353,38 +3253,6 @@ app.get('/api/cluster/mlflow-info', (req, res) => {
 });
 
 // 清除状态缓存 API
-app.post('/api/cluster/clear-status-cache', (req, res) => {
-  try {
-    const step1CacheFile = path.join(logManager.metadataDir, 'step1_status_cache.json');
-    const step2CacheFile = path.join(logManager.metadataDir, 'step2_status_cache.json');
-    
-    let clearedFiles = [];
-    
-    if (fs.existsSync(step1CacheFile)) {
-      fs.unlinkSync(step1CacheFile);
-      clearedFiles.push('Step 1 cache');
-    }
-    
-    if (fs.existsSync(step2CacheFile)) {
-      fs.unlinkSync(step2CacheFile);
-      clearedFiles.push('Step 2 cache');
-    }
-    
-    console.log(`Status cache cleared: ${clearedFiles.join(', ')}`);
-    
-    res.json({
-      success: true,
-      message: `Status cache cleared successfully: ${clearedFiles.join(', ')}`,
-      clearedFiles: clearedFiles
-    });
-  } catch (error) {
-    console.error('Error clearing status cache:', error);
-    res.json({
-      success: false,
-      error: error.message
-    });
-  }
-});
 
 // 获取 Step 1 状态 API
 app.get('/api/cluster/step1-status', async (req, res) => {
