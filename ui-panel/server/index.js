@@ -3256,58 +3256,6 @@ async function checkStep2Status() {
   }
 }
 
-// 执行集群启动脚本 (Step 1) - 使用 nohup 后台执行
-app.post('/api/cluster/launch', async (req, res) => {
-  try {
-    console.log('Launching cluster (Step 1) in background...');
-    
-    const cliPath = path.join(__dirname, '../../cli');
-    const scriptPath = path.join(cliPath, '1-cluster-launch.sh');
-    
-    // 检查脚本是否存在
-    if (!fs.existsSync(scriptPath)) {
-      throw new Error(`Script not found: ${scriptPath}`);
-    }
-
-    // 清除 Step 1 状态缓存，因为我们即将重新启动
-    const step1CacheFile = path.join(logManager.metadataDir, 'step1_status_cache.json');
-    if (fs.existsSync(step1CacheFile)) {
-      fs.unlinkSync(step1CacheFile);
-      console.log('Cleared Step 1 status cache before relaunch');
-    }
-
-    // 创建日志文件
-    const { logFilePath, logId } = logManager.createLogFile('launch');
-    
-    // 使用 nohup 后台执行，输出重定向到日志文件
-    const command = `cd "${cliPath}" && nohup bash -c 'echo "y" | bash 1-cluster-launch.sh' > "${logFilePath}" 2>&1 &`;
-    
-    exec(command, (error) => {
-      if (error) {
-        console.error('Failed to start script:', error);
-        logManager.updateStatus('launch', 'failed');
-      }
-    });
-    
-    // 立即返回，不等待脚本完成
-    logManager.updateStatus('launch', 'started');
-    
-    res.json({
-      success: true,
-      message: 'Cluster launch started in background',
-      logId: logId,
-      status: 'started'
-    });
-
-  } catch (error) {
-    console.error('Error launching cluster:', error);
-    res.json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
 // 执行集群配置脚本 (Step 2) - 使用 nohup 后台执行
 app.post('/api/cluster/configure', async (req, res) => {
   try {

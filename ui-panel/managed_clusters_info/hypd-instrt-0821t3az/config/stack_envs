@@ -1,7 +1,0 @@
-export EXECUTION_ROLE=arn:aws:iam::633205212955:role/eks-cluster-hypd-instrt-0821t3az-SMHP-Exec-Role-us-west-2
-export VPC_ID=vpc-09b08953a93eaf801
-export EKS_CLUSTER_ARN=arn:aws:eks:us-west-2:633205212955:cluster/eks-cluster-hypd-instrt-0821t3az
-export EKS_CLUSTER_NAME=eks-cluster-hypd-instrt-0821t3az
-export SECURITY_GROUP_ID=sg-0e5c73fdce8cffe11
-export LIFECYCLE_S3_BUCKET_NAME=eks-cluster-hypd-instrt-0821t3az-bucket-633205212955-us-west-2
-export PRIVATE_SUBNET_ID=subnet-0818567489acb07ff

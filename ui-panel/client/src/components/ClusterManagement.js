@@ -121,14 +121,18 @@ const ClusterManagement = () => {
       const result = await response.json();
       if (result.success) {
         setClusters(result.clusters);
-        setActiveCluster(result.activeCluster);
         
-        // 如果有活跃集群，加载其配置到表单
-        if (result.activeCluster) {
-          const activeClusterInfo = result.clusters.find(c => c.clusterTag === result.activeCluster);
-          if (activeClusterInfo && activeClusterInfo.config) {
-            form.setFieldsValue(activeClusterInfo.config);
-            setEnableFtp(activeClusterInfo.config.enableFtp || false);
+        // 只有当 activeCluster 真正改变时才更新
+        if (result.activeCluster !== activeCluster) {
+          setActiveCluster(result.activeCluster);
+          
+          // 如果有活跃集群，加载其配置到表单
+          if (result.activeCluster) {
+            const activeClusterInfo = result.clusters.find(c => c.clusterTag === result.activeCluster);
+            if (activeClusterInfo && activeClusterInfo.config) {
+              form.setFieldsValue(activeClusterInfo.config);
+              setEnableFtp(activeClusterInfo.config.enableFtp || false);
+            }
           }
         }
       }
@@ -255,19 +259,17 @@ const ClusterManagement = () => {
   };
 
   useEffect(() => {
+    console.log('ClusterManagement: Initial useEffect triggered');
     // 初始化多集群和表单默认值
     const initializeComponent = async () => {
       try {
+        console.log('ClusterManagement: Starting initialization');
         // 1. 获取集群列表
         await fetchClusters();
         
-        // 2. 如果没有活跃集群，设置默认值
-        if (!activeCluster) {
-          form.setFieldsValue(defaultConfig);
-        }
-        
-        // 3. 页面加载时自动检查状态 (无成功提示)
-        await refreshAllStatus(false);
+        // 暂时禁用自动状态检查，避免循环
+        // await refreshAllStatus(false);
+        console.log('ClusterManagement: Initialization completed');
       } catch (error) {
         console.error('Failed to initialize component:', error);
         // 如果初始化失败，至少设置默认值
@@ -276,7 +278,15 @@ const ClusterManagement = () => {
     };
     
     initializeComponent();
-  }, [form]);
+  }, []); // 只在组件挂载时执行一次
+
+  // 单独的 useEffect 处理 activeCluster 变化
+  useEffect(() => {
+    console.log('ClusterManagement: activeCluster changed to:', activeCluster);
+    if (!activeCluster) {
+      form.setFieldsValue(defaultConfig);
+    }
+  }, [activeCluster]); // 当 activeCluster 变化时设置默认值
 
   // 检查步骤状态的函数
   const checkStepStatus = async () => {

@@ -9,7 +9,6 @@
 source init_envs
 
 ./fetch-mlflow-server-info.sh &
-../ui-panel/_setup.sh &
 ./fetch-creation-cf-info.sh
 
 execute_aws_command() {

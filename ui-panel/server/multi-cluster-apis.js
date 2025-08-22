@@ -220,28 +220,140 @@ export AWS_AZ=$(aws ec2 describe-availability-zones --region $AWS_REGION --query
     }
   }
 
+  // 从 CLI 目录自动初始化多集群结构
+  async autoInitializeFromCLI() {
+    try {
+      // 1. 检查 CLI 目录的 init_envs 文件
+      const cliInitEnvs = path.join(this.clusterManager.cliDir, 'init_envs');
+      
+      if (!fs.existsSync(cliInitEnvs)) {
+        return {
+          success: false,
+          error: 'No init_envs found in CLI directory. Please save configuration first.'
+        };
+      }
+
+      // 2. 提取集群标识
+      const envContent = await fs.readFile(cliInitEnvs, 'utf8');
+      const clusterTagMatch = envContent.match(/export CLUSTER_TAG=(.+)/);
+      
+      if (!clusterTagMatch) {
+        return {
+          success: false,
+          error: 'CLUSTER_TAG not found in init_envs. Please check configuration.'
+        };
+      }
+
+      const clusterTag = clusterTagMatch[1].replace(/['"]/g, '').trim();
+      console.log(`Auto-initializing multi-cluster structure for: ${clusterTag}`);
+
+      // 3. 检查是否已经初始化
+      const clusterExists = this.clusterManager.clusterExists(clusterTag);
+      let initialized = false;
+
+      if (!clusterExists) {
+        // 4. 创建集群目录结构
+        this.clusterManager.createClusterDirs(clusterTag);
+        
+        // 5. 复制配置文件到集群目录
+        const clusterConfigDir = this.clusterManager.getClusterConfigDir(clusterTag);
+        await fs.copy(cliInitEnvs, path.join(clusterConfigDir, 'init_envs'));
+        
+        // 6. 复制其他已存在的配置文件
+        const filesToCopy = ['stack_envs', 'mlflow-server-info.json'];
+        for (const file of filesToCopy) {
+          const sourcePath = path.join(this.clusterManager.cliDir, file);
+          const targetPath = path.join(clusterConfigDir, file);
+          
+          if (fs.existsSync(sourcePath)) {
+            await fs.copy(sourcePath, targetPath);
+            console.log(`Copied existing ${file} to cluster directory`);
+          }
+        }
+        
+        // 7. 生成集群信息 metadata
+        const config = await this.extractConfigFromInitEnvs(envContent);
+        this.clusterManager.saveClusterInfo(clusterTag, config);
+        
+        initialized = true;
+        console.log(`Initialized multi-cluster structure for: ${clusterTag}`);
+      }
+
+      // 8. 设置为活跃集群
+      this.clusterManager.setActiveCluster(clusterTag);
+
+      return {
+        success: true,
+        clusterTag,
+        initialized
+      };
+
+    } catch (error) {
+      console.error('Error in autoInitializeFromCLI:', error);
+      return {
+        success: false,
+        error: `Failed to initialize multi-cluster structure: ${error.message}`
+      };
+    }
+  }
+
+  // 从 init_envs 内容提取配置信息
+  async extractConfigFromInitEnvs(envContent) {
+    const extractValue = (key) => {
+      const match = envContent.match(new RegExp(`export ${key}=(.+)`));
+      return match ? match[1].replace(/['"]/g, '').trim() : '';
+    };
+
+    return {
+      clusterTag: extractValue('CLUSTER_TAG'),
+      awsRegion: extractValue('AWS_REGION'),
+      ftpName: extractValue('FTP_NAME'),
+      gpuCapacityAz: extractValue('GPU_CAPACITY_AZ'),
+      gpuInstanceType: extractValue('GPU_INSTANCE_TYPE'),
+      gpuInstanceCount: parseInt(extractValue('GPU_INSTANCE_COUNT')) || 1,
+      enableFtp: !!extractValue('FTP_NAME') && extractValue('FTP_NAME') !== 'your-ftp-name'
+    };
+  }
+
   // 执行集群启动 (Step 1) - 支持多集群
   async handleLaunch(req, res) {
     try {
-      const activeCluster = this.clusterManager.getActiveCluster();
+      // 1. 自动初始化多集群结构（从 ../cli/init_envs 提取信息）
+      const initResult = await this.autoInitializeFromCLI();
       
-      if (!activeCluster) {
+      if (!initResult.success) {
         return res.status(400).json({
           success: false,
-          error: 'No active cluster. Please save configuration first.'
+          error: initResult.error
         });
       }
 
+      const activeCluster = initResult.clusterTag;
       console.log(`Launching cluster (Step 1) for: ${activeCluster}`);
       
-      // 清除 Step 1 缓存
+      // 2. 检查 Step 1 是否已经完成（防重复创建）
+      const MultiClusterStatus = require('./multi-cluster-status');
+      const statusChecker = new MultiClusterStatus();
+      const step1Status = await statusChecker.checkStep1Status(activeCluster);
+      
+      if (step1Status.status === 'completed') {
+        return res.json({
+          success: true,
+          message: `Step 1 already completed for cluster: ${activeCluster}. CloudFormation stack exists.`,
+          clusterTag: activeCluster,
+          alreadyCompleted: true,
+          statusDetails: step1Status
+        });
+      }
+      
+      // 3. 清除 Step 1 缓存
       this.clusterManager.clearClusterCache(activeCluster);
       
-      // 创建集群专用的日志管理器
+      // 4. 创建集群专用的日志管理器
       const logManager = new MultiClusterLogManager(activeCluster);
       const logFilePath = logManager.createLogFile('launch');
       
-      // 执行脚本
+      // 5. 执行脚本
       const cliPath = this.clusterManager.cliDir;
       const command = `cd "${cliPath}" && nohup bash -c 'echo "y" | bash 1-cluster-launch.sh' > "${logFilePath}" 2>&1 &`;
       
@@ -261,7 +373,8 @@ export AWS_AZ=$(aws ec2 describe-availability-zones --region $AWS_REGION --query
       res.json({
         success: true,
         message: `Step 1 launched for cluster: ${activeCluster}`,
-        clusterTag: activeCluster
+        clusterTag: activeCluster,
+        initialized: initResult.initialized
       });
 
     } catch (error) {
@@ -287,14 +400,40 @@ export AWS_AZ=$(aws ec2 describe-availability-zones --region $AWS_REGION --query
 
       console.log(`Configuring cluster (Step 2) for: ${activeCluster}`);
       
-      // 清除 Step 2 缓存
+      // 1. 检查 Step 1 是否已完成（Step 2 的前置条件）
+      const MultiClusterStatus = require('./multi-cluster-status');
+      const statusChecker = new MultiClusterStatus();
+      const step1Status = await statusChecker.checkStep1Status(activeCluster);
+      
+      if (step1Status.status !== 'completed') {
+        return res.status(400).json({
+          success: false,
+          error: `Step 1 must be completed before Step 2. Current Step 1 status: ${step1Status.status}`,
+          step1Status: step1Status
+        });
+      }
+      
+      // 2. 检查 Step 2 是否已经完成（防重复配置）
+      const step2Status = await statusChecker.checkStep2Status(activeCluster);
+      
+      if (step2Status.status === 'completed') {
+        return res.json({
+          success: true,
+          message: `Step 2 already completed for cluster: ${activeCluster}. All Kubernetes components are ready.`,
+          clusterTag: activeCluster,
+          alreadyCompleted: true,
+          statusDetails: step2Status
+        });
+      }
+      
+      // 3. 清除 Step 2 缓存
       this.clusterManager.clearClusterCache(activeCluster);
       
-      // 创建集群专用的日志管理器
+      // 4. 创建集群专用的日志管理器
       const logManager = new MultiClusterLogManager(activeCluster);
       const logFilePath = logManager.createLogFile('configure');
       
-      // 执行脚本
+      // 5. 执行脚本
       const cliPath = this.clusterManager.cliDir;
       const command = `cd "${cliPath}" && nohup bash -c 'echo "y" | bash 2-cluster-configs.sh' > "${logFilePath}" 2>&1 &`;
       
