@@ -70,7 +70,7 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
 --trust-remote-code`;
     } else if (dockerImage.includes('gptoss')) {
       return `vllm serve \\
-/s3/openai/gpt-oss-120b \\
+/s3/openai-gpt-oss-120b \\
 --tensor-parallel-size 2 \\
 --host 0.0.0.0 \\
 --port 8000 \\
@@ -78,7 +78,7 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
     } else {
       // 默认VLLM serve命令
       return `vllm serve \\
-/s3/Qwen/Qwen3-0.6B \\
+/s3/Qwen-Qwen3-0.6B \\
 --max-num-seqs 32 \\
 --max-model-len 1280 \\
 --tensor-parallel-size 1 \\
