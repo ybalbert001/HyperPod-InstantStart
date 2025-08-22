@@ -1,11 +1,5 @@
 #!/bin/bash
 
-# aws eks create-access-entry \
-#  --cluster-name $EKS_CLUSTER_NAME \
-#  --principal-arn arn:aws:iam::xxxxxxxxxxxx:role/ExampleRole \
-#  --type STANDARD \
-#  --region $AWS_REGION
-
 source init_envs
 
 ./fetch-mlflow-server-info.sh &
