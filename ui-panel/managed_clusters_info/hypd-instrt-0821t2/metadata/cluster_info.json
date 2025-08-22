@@ -1,0 +1,15 @@
+{
+  "clusterTag": "hypd-instrt-0821t2",
+  "createdAt": "2025-08-22T00:48:20.160Z",
+  "lastModified": "2025-08-22T00:48:20.160Z",
+  "config": {
+    "clusterTag": "hypd-instrt-0821t2",
+    "awsRegion": "us-west-2",
+    "ftpName": "your-ftp-name",
+    "gpuCapacityAz": "us-west-2c",
+    "gpuInstanceType": "ml.g6.12xlarge",
+    "gpuInstanceCount": 2,
+    "enableFtp": true
+  },
+  "status": "migrated"
+}

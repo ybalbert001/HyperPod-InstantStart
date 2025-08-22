@@ -1,0 +1,338 @@
+/* AWS-inspired Professional Theme */
+
+:root {
+  /* AWS Orange & Blue Color Palette */
+  --aws-orange: #FF9900;
+  --aws-orange-light: #FFB84D;
+  --aws-orange-dark: #E6890A;
+  --aws-blue: #232F3E;
+  --aws-blue-light: #37475A;
+  --aws-blue-dark: #161E2D;
+  
+  /* Professional Grays */
+  --aws-gray-50: #FAFBFC;
+  --aws-gray-100: #F2F3F3;
+  --aws-gray-200: #EAEDED;
+  --aws-gray-300: #D5DBDB;
+  --aws-gray-400: #A9B7BC;
+  --aws-gray-500: #879196;
+  --aws-gray-600: #687078;
+  --aws-gray-700: #4F5B62;
+  --aws-gray-800: #37424A;
+  --aws-gray-900: #232F3E;
+  
+  /* Status Colors */
+  --aws-success: #1D8102;
+  --aws-success-light: #7AA116;
+  --aws-warning: #FF9900;
+  --aws-error: #D13212;
+  --aws-info: #0073BB;
+  
+  /* Cloud Service Colors */
+  --aws-compute: #FF9900;
+  --aws-storage: #3F48CC;
+  --aws-database: #C925D1;
+  --aws-ml: #01A88D;
+  --aws-analytics: #8C4FFF;
+  
+  /* Shadows & Effects */
+  --aws-shadow-sm: 0 1px 3px rgba(35, 47, 62, 0.1);
+  --aws-shadow-md: 0 4px 6px rgba(35, 47, 62, 0.1);
+  --aws-shadow-lg: 0 10px 15px rgba(35, 47, 62, 0.1);
+  --aws-shadow-xl: 0 20px 25px rgba(35, 47, 62, 0.15);
+  
+  /* Border Radius */
+  --aws-radius-sm: 4px;
+  --aws-radius-md: 8px;
+  --aws-radius-lg: 12px;
+  --aws-radius-xl: 16px;
+}
+
+/* Global Overrides for Professional Look */
+body {
+  font-family: 'Amazon Ember', 'Helvetica Neue', Arial, sans-serif;
+  background: var(--aws-gray-50);
+  color: var(--aws-gray-900);
+}
+
+/* Header Styling */
+.aws-header {
+  background: linear-gradient(135deg, var(--aws-blue) 0%, var(--aws-blue-light) 100%);
+  border-bottom: 3px solid var(--aws-orange);
+  box-shadow: var(--aws-shadow-md);
+}
+
+.aws-header .ant-layout-header {
+  background: transparent;
+  border-bottom: none;
+}
+
+.aws-header-title {
+  color: white;
+  font-weight: 600;
+  font-size: 24px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.aws-header-subtitle {
+  color: var(--aws-gray-200);
+  font-size: 14px;
+  font-weight: 400;
+  margin-left: 8px;
+}
+
+/* Card Styling */
+.aws-card {
+  border-radius: var(--aws-radius-lg);
+  border: 1px solid var(--aws-gray-200);
+  box-shadow: var(--aws-shadow-sm);
+  transition: all 0.3s ease;
+}
+
+.aws-card:hover {
+  box-shadow: var(--aws-shadow-md);
+  transform: translateY(-2px);
+}
+
+.aws-card .ant-card-head {
+  border-bottom: 2px solid var(--aws-gray-100);
+  background: linear-gradient(135deg, var(--aws-gray-50) 0%, white 100%);
+  border-radius: var(--aws-radius-lg) var(--aws-radius-lg) 0 0;
+}
+
+.aws-card .ant-card-head-title {
+  color: var(--aws-gray-900);
+  font-weight: 600;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Service-specific Card Colors */
+.aws-card.compute .ant-card-head {
+  border-left: 4px solid var(--aws-compute);
+}
+
+.aws-card.storage .ant-card-head {
+  border-left: 4px solid var(--aws-storage);
+}
+
+.aws-card.ml .ant-card-head {
+  border-left: 4px solid var(--aws-ml);
+}
+
+.aws-card.analytics .ant-card-head {
+  border-left: 4px solid var(--aws-analytics);
+}
+
+/* Button Styling */
+.aws-btn-primary {
+  background: linear-gradient(135deg, var(--aws-orange) 0%, var(--aws-orange-light) 100%);
+  border: none;
+  border-radius: var(--aws-radius-md);
+  font-weight: 600;
+  box-shadow: var(--aws-shadow-sm);
+  transition: all 0.3s ease;
+}
+
+.aws-btn-primary:hover {
+  background: linear-gradient(135deg, var(--aws-orange-dark) 0%, var(--aws-orange) 100%);
+  box-shadow: var(--aws-shadow-md);
+  transform: translateY(-1px);
+}
+
+.aws-btn-secondary {
+  background: white;
+  border: 2px solid var(--aws-gray-300);
+  color: var(--aws-gray-700);
+  border-radius: var(--aws-radius-md);
+  font-weight: 600;
+  transition: all 0.3s ease;
+}
+
+.aws-btn-secondary:hover {
+  border-color: var(--aws-orange);
+  color: var(--aws-orange);
+  box-shadow: var(--aws-shadow-sm);
+}
+
+/* Status Indicators */
+.aws-status-success {
+  color: var(--aws-success);
+  background: rgba(29, 129, 2, 0.1);
+  border: 1px solid rgba(29, 129, 2, 0.2);
+  border-radius: var(--aws-radius-sm);
+  padding: 4px 8px;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.aws-status-warning {
+  color: var(--aws-warning);
+  background: rgba(255, 153, 0, 0.1);
+  border: 1px solid rgba(255, 153, 0, 0.2);
+  border-radius: var(--aws-radius-sm);
+  padding: 4px 8px;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.aws-status-error {
+  color: var(--aws-error);
+  background: rgba(209, 50, 18, 0.1);
+  border: 1px solid rgba(209, 50, 18, 0.2);
+  border-radius: var(--aws-radius-sm);
+  padding: 4px 8px;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+/* Table Styling */
+.aws-table .ant-table {
+  border-radius: var(--aws-radius-lg);
+  overflow: hidden;
+  box-shadow: var(--aws-shadow-sm);
+}
+
+.aws-table .ant-table-thead > tr > th {
+  background: var(--aws-gray-100);
+  border-bottom: 2px solid var(--aws-gray-200);
+  color: var(--aws-gray-800);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.aws-table .ant-table-tbody > tr:hover > td {
+  background: var(--aws-gray-50);
+}
+
+/* Progress Bar Styling */
+.aws-progress .ant-progress-bg {
+  background: linear-gradient(90deg, var(--aws-success) 0%, var(--aws-success-light) 100%);
+}
+
+.aws-progress.warning .ant-progress-bg {
+  background: linear-gradient(90deg, var(--aws-warning) 0%, var(--aws-orange-light) 100%);
+}
+
+.aws-progress.danger .ant-progress-bg {
+  background: linear-gradient(90deg, var(--aws-error) 0%, #FF6B6B 100%);
+}
+
+/* Tabs Styling */
+.aws-tabs .ant-tabs-tab {
+  border-radius: var(--aws-radius-md) var(--aws-radius-md) 0 0;
+  font-weight: 600;
+  transition: all 0.3s ease;
+}
+
+.aws-tabs .ant-tabs-tab-active {
+  background: white;
+  border-bottom: 3px solid var(--aws-orange);
+}
+
+.aws-tabs .ant-tabs-ink-bar {
+  background: var(--aws-orange);
+  height: 3px;
+}
+
+/* Statistics Cards */
+.aws-stat-card {
+  background: linear-gradient(135deg, white 0%, var(--aws-gray-50) 100%);
+  border: 1px solid var(--aws-gray-200);
+  border-radius: var(--aws-radius-lg);
+  padding: 24px;
+  text-align: center;
+  box-shadow: var(--aws-shadow-sm);
+  transition: all 0.3s ease;
+}
+
+.aws-stat-card:hover {
+  box-shadow: var(--aws-shadow-md);
+  transform: translateY(-2px);
+}
+
+.aws-stat-card .ant-statistic-content {
+  color: var(--aws-gray-900);
+  font-weight: 700;
+  font-size: 32px;
+}
+
+.aws-stat-card .ant-statistic-title {
+  color: var(--aws-gray-600);
+  font-weight: 600;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Service Icons */
+.aws-service-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--aws-radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.aws-service-icon.ec2 { background: var(--aws-compute); }
+.aws-service-icon.s3 { background: var(--aws-storage); }
+.aws-service-icon.sagemaker { background: var(--aws-ml); }
+.aws-service-icon.eks { background: var(--aws-analytics); }
+
+/* Loading States */
+.aws-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px;
+  color: var(--aws-gray-600);
+}
+
+.aws-loading .ant-spin-dot {
+  color: var(--aws-orange);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .aws-header-title {
+    font-size: 20px;
+  }
+  
+  .aws-card {
+    margin-bottom: 16px;
+  }
+  
+  .aws-stat-card .ant-statistic-content {
+    font-size: 24px;
+  }
+}
+
+/* Dark Mode Support */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --aws-gray-50: #1a1a1a;
+    --aws-gray-100: #2d2d2d;
+    --aws-gray-200: #404040;
+    --aws-gray-300: #595959;
+  }
+  
+  body {
+    background: var(--aws-gray-50);
+    color: var(--aws-gray-100);
+  }
+  
+  .aws-card {
+    background: var(--aws-gray-100);
+    border-color: var(--aws-gray-200);
+  }
+}
