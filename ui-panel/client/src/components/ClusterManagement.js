@@ -494,14 +494,14 @@ const ClusterManagement = () => {
       if (result.success) {
         message.success('Cluster configuration started in background');
         
-        // 立即进行完整状态刷新
+        // 5秒后进行完整状态刷新
         setTimeout(async () => {
           try {
             await refreshAllStatus(false); // 完整刷新，包含状态检查
           } catch (error) {
             console.error('Error during post-configure refresh:', error);
           }
-        }, 1500); // 1.5秒后刷新
+        }, 5000); // 5秒后刷新，给配置脚本启动时间
       } else {
         setStep2Status('error');
         message.error(`Cluster configuration failed: ${result.error}`);
