@@ -164,6 +164,33 @@ class MultiClusterStatus {
         return cachedStatus;
       }
 
+      // 首先检查是否有 Step2 的执行记录（metadata）
+      const metadataDir = this.clusterManager.getClusterMetadataDir(clusterTag);
+      const step2LogFile = path.join(metadataDir, 'configure_status.json');
+      const step2LogExists = fs.existsSync(step2LogFile);
+      
+      // 如果没有 Step2 的执行记录，说明还未启动过
+      if (!step2LogExists) {
+        return {
+          status: 'not_started',
+          message: 'Step 2 has not been executed yet',
+          summary: {
+            total: 0,
+            ready: 0,
+            error: 0,
+            missing: 0
+          },
+          checks: [],
+          details: {
+            totalChecks: 0,
+            readyCount: 0,
+            errorCount: 0,
+            missingCount: 0,
+            components: []
+          }
+        };
+      }
+
       // 检查 Kubernetes 资源
       const checks = [
         this.checkS3CSINodes(),
@@ -198,6 +225,13 @@ class MultiClusterStatus {
       const result = {
         status: overallStatus,
         message,
+        summary: {
+          total: totalChecks,
+          ready: readyCount,
+          error: errorCount,
+          missing: missingCount
+        },
+        checks: results,
         details: {
           totalChecks,
           readyCount,

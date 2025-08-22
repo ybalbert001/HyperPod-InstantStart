@@ -455,14 +455,14 @@ const ClusterManagement = () => {
       if (result.success) {
         message.success('Cluster launch started in background. Use "Refresh Status" to check progress.');
         
-        // 立即进行一次快速状态检查，然后再进行完整刷新
+        // 延长刷新时间到60秒，给 CloudFormation 堆栈创建足够的时间
         setTimeout(async () => {
           try {
             await refreshAllStatus(false); // 完整刷新，包含状态检查
           } catch (error) {
             console.error('Error during post-launch refresh:', error);
           }
-        }, 1500); // 1.5秒后刷新，给API一些处理时间
+        }, 60000); // 60秒后刷新，给 CloudFormation 足够的启动时间
       } else {
         setStep1Status('error');
         message.error(`Cluster launch failed: ${result.error}`);
@@ -880,10 +880,10 @@ const ClusterManagement = () => {
                   <Text strong>Launch Status (CloudFormation):</Text>
                   {step1Details ? (
                     <div style={{ marginTop: '4px' }}>
-                      {getCloudFormationStatusTag(step1Details.cloudFormationStatus)}
+                      {getCloudFormationStatusTag(step1Details.stackStatus || step1Details.status)}
                       <br />
                       <Text type="secondary" style={{ fontSize: '12px' }}>
-                        Stack: {step1Details.stackName} | Last Updated: {step1Details.lastUpdated ? new Date(step1Details.lastUpdated).toLocaleString() : 'N/A'}
+                        Stack: {step1Details.stackName} | Last Updated: {step1Details.details?.lastUpdatedTime ? new Date(step1Details.details.lastUpdatedTime).toLocaleString() : 'N/A'}
                       </Text>
                     </div>
                   ) : (
@@ -1136,7 +1136,7 @@ const ClusterManagement = () => {
                   lineHeight: '1.2'
                 }}>
                   <Text style={{ fontSize: '9px' }}>
-                    CF: {step1Details.cloudFormationStatus} | {step1Details.stackName}
+                    CF: {step1Details.stackStatus || step1Details.status} | {step1Details.stackName}
                   </Text>
                 </div>
               )}
