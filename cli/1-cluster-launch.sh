@@ -16,7 +16,7 @@ printenv | grep -E "(CLOUD_FORMATION|AWS_|EKS_|HP_|GPU_|DEPLOY_|ACCOUNT_|STACK_)
 # echo "继续执行..."
 
 aws s3 mb s3://$DEPLOY_MODEL_S3_BUCKET --region ${AWS_REGION}
-
+sleep 10
 
 if [ -n "$FTP_NAME" ]; then
     echo "FTP_NAME is set: $FTP_NAME"
@@ -69,7 +69,7 @@ fi
 
 
 CURRENT_ROLE_ARN=$(aws sts get-caller-identity --query Arn --output text)
-CURRENT_ROLE_NAME=$(echo "$CURRENT_ARN" | sed 's/.*role\///g' | sed 's/\/.*//g')
+CURRENT_ROLE_NAME=$(echo "$CURRENT_ROLE_ARN" | sed 's/.*role\///g' | sed 's/\/.*//g')
 IAM_ROLE_ARN=arn:aws:iam::$ACCOUNT_ID:role/$CURRENT_ROLE_NAME
 
 aws sagemaker create-mlflow-tracking-server \
