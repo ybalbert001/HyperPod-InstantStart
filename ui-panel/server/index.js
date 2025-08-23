@@ -684,7 +684,7 @@ app.post('/api/launch-torch-training', async (req, res) => {
       efaCount = 16,
       entryPythonScriptPath,
       pythonScriptParameters,
-      mlflowTrackingUri = 'arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow',
+      mlflowTrackingUri = '',
       logMonitoringConfig
     } = req.body;
 
@@ -861,7 +861,7 @@ app.post('/api/launch-training', async (req, res) => {
       efaCount = 0,
       lmfRecipeRunPath,
       lmfRecipeYamlFile,
-      mlflowTrackingUri = 'arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow',
+      mlflowTrackingUri = '',
       logMonitoringConfig
     } = req.body;
 
@@ -1014,11 +1014,11 @@ ${indentedConfig}`;
   }
 });
 
-// 保存训练配置
-app.post('/api/training-config/save', async (req, res) => {
+// 保存LlamaFactory配置
+app.post('/api/llamafactory-config/save', async (req, res) => {
   try {
     const config = req.body;
-    const configPath = path.join(__dirname, '../config/training-config.json');
+    const configPath = path.join(__dirname, '../config/llamafactory-config.json');
     
     // 确保config目录存在
     const configDir = path.join(__dirname, '../config');
@@ -1027,11 +1027,11 @@ app.post('/api/training-config/save', async (req, res) => {
     }
     
     await fs.writeFile(configPath, JSON.stringify(config, null, 2));
-    console.log('Training config saved:', config);
+    console.log('LlamaFactory config saved:', config);
     
     res.json({
       success: true,
-      message: 'Training configuration saved successfully'
+      message: 'LlamaFactory configuration saved successfully'
     });
   } catch (error) {
     console.error('Error saving training config:', error);
@@ -1042,10 +1042,10 @@ app.post('/api/training-config/save', async (req, res) => {
   }
 });
 
-// 加载训练配置
-app.get('/api/training-config/load', async (req, res) => {
+// 加载LlamaFactory配置
+app.get('/api/llamafactory-config/load', async (req, res) => {
   try {
-    const configPath = path.join(__dirname, '../config/training-config.json');
+    const configPath = path.join(__dirname, '../config/llamafactory-config.json');
     
     if (!fs.existsSync(configPath)) {
       // 返回默认配置
@@ -1058,7 +1058,7 @@ app.get('/api/training-config/load', async (req, res) => {
         efaCount: 16,
         lmfRecipeRunPath: '/s3/training_code/model-training-with-hyperpod-training-operator/llama-factory-project/',
         lmfRecipeYamlFile: 'qwen06b_full_sft_template.yaml',
-        mlflowTrackingUri: 'arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow',
+        mlflowTrackingUri: '',
         logMonitoringConfig: ''
       };
       
@@ -1072,7 +1072,7 @@ app.get('/api/training-config/load', async (req, res) => {
     const configContent = await fs.readFile(configPath, 'utf8');
     const config = JSON.parse(configContent);
     
-    console.log('Training config loaded:', config);
+    console.log('LlamaFactory config loaded:', config);
     
     res.json({
       success: true,
@@ -1132,7 +1132,7 @@ app.get('/api/script-config/load', async (req, res) => {
         efaCount: 16,
         projectPath: '/s3/training_code/my-training-project/',
         entryPath: 'train.py',
-        mlflowTrackingUri: 'arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow',
+        mlflowTrackingUri: '',
         logMonitoringConfig: ''
       };
       
@@ -1176,7 +1176,7 @@ app.post('/api/launch-script-training', async (req, res) => {
       efaCount = 16,
       projectPath,
       entryPath,
-      mlflowTrackingUri = 'arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow',
+      mlflowTrackingUri = '',
       logMonitoringConfig
     } = req.body;
 
@@ -1373,7 +1373,7 @@ app.get('/api/torch-config/load', async (req, res) => {
         efaCount: 16,
         entryPythonScriptPath: '/s3/training_code/model-training-with-hyperpod-training-operator/torch-training.py',
         pythonScriptParameters: '--learning_rate 1e-5 \\\n--batch_size 1',
-        mlflowTrackingUri: 'arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow',
+        mlflowTrackingUri: '',
         logMonitoringConfig: ''
       };
       
@@ -1453,7 +1453,7 @@ app.get('/api/verl-config/load', async (req, res) => {
         evalSteps: 50,
         warmupSteps: 100,
         entryScriptPath: '/s3/verl_training/scripts/train_verl.py',
-        mlflowTrackingUri: 'arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow',
+        mlflowTrackingUri: '',
         advancedConfig: ''
       };
       
@@ -1557,7 +1557,7 @@ app.delete('/api/training-jobs/:jobName', async (req, res) => {
 
 // MLflow配置管理
 
-const CONFIG_FILE = path.join(__dirname, '../config/mlflow-config.json');
+const CONFIG_FILE = path.join(__dirname, '../config/mlflow-metric-config.json');
 
 // 确保配置目录存在
 const configDir = path.dirname(CONFIG_FILE);
@@ -1567,7 +1567,7 @@ if (!fs.existsSync(configDir)) {
 
 // 默认MLflow配置
 const DEFAULT_MLFLOW_CONFIG = {
-  tracking_uri: 'arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow3'
+  tracking_uri: ''
 };
 
 // 读取MLflow配置
@@ -1595,7 +1595,7 @@ function saveMlflowConfig(config) {
 }
 
 // 获取MLflow配置
-app.get('/api/mlflow-config', (req, res) => {
+app.get('/api/mlflow-metric-config', (req, res) => {
   try {
     const config = readMlflowConfig();
     res.json({
@@ -1612,7 +1612,7 @@ app.get('/api/mlflow-config', (req, res) => {
 });
 
 // 保存MLflow配置
-app.post('/api/mlflow-config', (req, res) => {
+app.post('/api/mlflow-metric-config', (req, res) => {
   try {
     const { tracking_uri } = req.body;
     
@@ -1647,7 +1647,7 @@ app.post('/api/mlflow-config', (req, res) => {
 });
 
 // 测试MLflow连接
-app.post('/api/mlflow-config/test', async (req, res) => {
+app.post('/api/mlflow-metric-config/test', async (req, res) => {
   try {
     const { tracking_uri } = req.body;
     

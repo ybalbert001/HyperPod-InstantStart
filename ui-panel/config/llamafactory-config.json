@@ -1,0 +1,12 @@
+{
+  "trainingJobName": "test-job",
+  "instanceType": "ml.g5.12xlarge",
+  "dockerImage": "test-image",
+  "nprocPerNode": 1,
+  "replicas": 1,
+  "efaCount": 1,
+  "lmfRecipeRunPath": "/test/path",
+  "lmfRecipeYamlFile": "test.yaml",
+  "mlflowTrackingUri": "test-uri",
+  "logMonitoringConfig": "test-log-config"
+}

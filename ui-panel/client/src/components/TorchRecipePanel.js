@@ -193,7 +193,7 @@ const TorchRecipePanel = ({ onLaunch, deploymentStatus }) => {
           efaCount: 16,
           entryPythonScriptPath: '/s3/training_code/model-training-with-hyperpod-training-operator/torch-training.py',
           pythonScriptParameters: '--learning_rate 1e-5 \\\n--batch_size 1',
-          mlflowTrackingUri: 'arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow',
+          mlflowTrackingUri: '',
           logMonitoringConfig: ''
         }}
       >
@@ -335,14 +335,17 @@ const TorchRecipePanel = ({ onLaunch, deploymentStatus }) => {
           label={
             <Space>
               <DatabaseOutlined />
-              <Text strong>SageMaker MLFlow ARN</Text>
+              <Text strong>SageMaker MLFlow ARN (Optional)</Text>
             </Space>
           }
           name="mlflowTrackingUri"
           rules={[
-            { required: true, message: 'Please input MLFlow tracking URI!' },
-            { pattern: /^arn:aws:sagemaker:/, message: 'Must be a valid SageMaker ARN' }
+            { 
+              pattern: /^(arn:aws:sagemaker:|$)/, 
+              message: 'Must be a valid SageMaker ARN or leave empty to disable MLFlow' 
+            }
           ]}
+          extra="Leave empty to disable MLFlow tracking for this training job"
         >
           <Input placeholder="arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow" />
         </Form.Item>

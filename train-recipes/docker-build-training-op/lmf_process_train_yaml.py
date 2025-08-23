@@ -79,7 +79,8 @@ def main():
         'DATASET': data['dataset'].split('/')[-1],
         'CUTOFF': str(data['cutoff_len']),
         'ZEROCONF': data['deepspeed'].split('/')[-1],
-        'MBS': data['per_device_train_batch_size']
+        'MBS': data['per_device_train_batch_size'],
+        'ACCUM': data['gradient_accumulation_steps']
     }
 
     with open('mlflow-tags.json', 'w') as f:

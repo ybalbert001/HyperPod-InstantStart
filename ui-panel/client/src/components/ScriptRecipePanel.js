@@ -192,7 +192,7 @@ const ScriptRecipePanel = ({ onLaunch, deploymentStatus }) => {
           efaCount: 16,
           projectPath: '/s3/training_code/my-training-project/',
           entryPath: 'train.py',
-          mlflowTrackingUri: 'arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow',
+          mlflowTrackingUri: '',
           logMonitoringConfig: ''
         }}
       >
@@ -335,14 +335,17 @@ const ScriptRecipePanel = ({ onLaunch, deploymentStatus }) => {
           label={
             <Space>
               <CloudServerOutlined />
-              <Text strong>SageMaker MLFlow ARN</Text>
+              <Text strong>SageMaker MLFlow ARN (Optional)</Text>
             </Space>
           }
           name="mlflowTrackingUri"
           rules={[
-            { required: true, message: 'Please input MLFlow tracking URI!' },
-            { pattern: /^arn:aws:sagemaker:/, message: 'Must be a valid SageMaker ARN' }
+            { 
+              pattern: /^(arn:aws:sagemaker:|$)/, 
+              message: 'Must be a valid SageMaker ARN or leave empty to disable MLFlow' 
+            }
           ]}
+          extra="Leave empty to disable MLFlow tracking for this training job"
         >
           <Input placeholder="arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow" />
         </Form.Item>

@@ -57,9 +57,9 @@ def set_infrastructure_tags():
             "model": mlflow_metric_tags['MODEL'],
             "dataset": mlflow_metric_tags['DATASET'],
             "cutoff_len": mlflow_metric_tags['CUTOFF'],
-            "deepspeed_conf": mlflow_metric_tags['DSCONF'],
+            "deepspeed_conf": mlflow_metric_tags['ZEROCONF'],
             # "micro_batchsize": mlflow_lmf_tag_envs['LMF_MBS'],
-            "batch_size": mlflow_metric_tags['MBS'] * int(os.getenv("MLFLOW_TAG_REPLICAS")) * int(os.getenv("MLFLOW_TAG_NPROCPERNODE"))
+            "batch_size": mlflow_metric_tags['MBS'] * int(mlflow_metric_tags['ACCUM']) * int(os.getenv("MLFLOW_TAG_REPLICAS")) * int(os.getenv("MLFLOW_TAG_NPROCPERNODE"))
         }
         
         infra_info.update(gen_info)

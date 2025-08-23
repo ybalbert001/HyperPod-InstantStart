@@ -13,6 +13,9 @@ TORCH_RECIPE_DIRPATH=${TORCH_RECIPE_PY_PATH%/*}
 PY_NAME=$(basename "$TORCH_RECIPE_PY_PATH")
 cp -r $TORCH_RECIPE_DIRPATH/* ./
 
+echo "处理 MLFlow tags"
+python torch_process_train_args.py "$TORCH_RECIPE_PY_PARAMS"
+
 [ -f "requirements.txt" ] && pip install -r requirements.txt
 
 CMD="hyperpodrun \

@@ -7,5 +7,5 @@
   "efaCount": 1,
   "projectPath": "/s3/training_code/model-training-with-hyperpod-training-operator/qwen25-vl-project/Qwen2.5-VL/",
   "entryPath": "qwen-vl-finetune/sft_3b_test.sh",
-  "mlflowTrackingUri": "arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow"
+  "mlflowTrackingUri": ""
 }

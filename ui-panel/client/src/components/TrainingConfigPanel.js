@@ -47,7 +47,7 @@ const TrainingConfigPanel = ({ onLaunch, deploymentStatus }) => {
 
   const loadSavedConfig = async () => {
     try {
-      const response = await fetch('/api/training-config/load');
+      const response = await fetch('/api/llamafactory-config/load');
       const result = await response.json();
       
       if (result.success) {
@@ -71,7 +71,7 @@ const TrainingConfigPanel = ({ onLaunch, deploymentStatus }) => {
       setSaving(true);
       const values = await form.validateFields();
       
-      const response = await fetch('/api/training-config/save', {
+      const response = await fetch('/api/llamafactory-config/save', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -175,7 +175,7 @@ const TrainingConfigPanel = ({ onLaunch, deploymentStatus }) => {
           efaCount: 16,
           lmfRecipeRunPath: '/s3/training_code/model-training-with-hyperpod-training-operator/llama-factory-project/',
           lmfRecipeYamlFile: 'qwen06b_full_sft_template.yaml',
-          mlflowTrackingUri: 'arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow',
+          mlflowTrackingUri: '',
           logMonitoringConfig: ''
         }}
       >
@@ -312,14 +312,17 @@ const TrainingConfigPanel = ({ onLaunch, deploymentStatus }) => {
           label={
             <Space>
               <DatabaseOutlined />
-              <Text strong>SageMaker MLFlow ARN</Text>
+              <Text strong>SageMaker MLFlow ARN (Optional)</Text>
             </Space>
           }
           name="mlflowTrackingUri"
           rules={[
-            { required: true, message: 'Please input MLFlow tracking URI!' },
-            { pattern: /^arn:aws:sagemaker:/, message: 'Must be a valid SageMaker ARN' }
+            { 
+              pattern: /^(arn:aws:sagemaker:|$)/, 
+              message: 'Must be a valid SageMaker ARN or leave empty to disable MLFlow' 
+            }
           ]}
+          extra="Leave empty to disable MLFlow tracking for this training job"
         >
           <Input placeholder="arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow" />
         </Form.Item>

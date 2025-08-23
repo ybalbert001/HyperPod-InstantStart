@@ -86,7 +86,7 @@ const TrainingHistoryPanel = () => {
   // 获取MLflow配置
   const fetchMlflowConfig = async () => {
     try {
-      const response = await fetch('/api/mlflow-config');
+      const response = await fetch('/api/mlflow-metric-config');
       const result = await response.json();
       
       if (result.success) {
@@ -107,7 +107,7 @@ const TrainingHistoryPanel = () => {
   // 保存MLflow配置
   const saveMlflowConfig = async (values) => {
     try {
-      const response = await fetch('/api/mlflow-config', {
+      const response = await fetch('/api/mlflow-metric-config', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -143,7 +143,7 @@ const TrainingHistoryPanel = () => {
     const values = configForm.getFieldsValue();
     
     try {
-      const response = await fetch('/api/mlflow-config/test', {
+      const response = await fetch('/api/mlflow-metric-config/test', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -241,7 +241,7 @@ const TrainingHistoryPanel = () => {
       'proc_per_node': 'Proc Per\nNode',
       'batch_size': 'Batch\nSize',
       'cutoff_len': 'Cutoff\nLen',
-      'deepspeed_conf': 'DeepSpeed\nConf'
+      'deepspeed_conf': 'Zero\nConf'
     };
     
     if (titleMap[tagKey]) {
