@@ -49,12 +49,12 @@ def save_to_json(config, filename='config.json'):
         "MODEL": config['model_type'] if 'model_name_or_path' not in config else config['model_name_or_path'],
         "DATASET": config['dataset_name'],
         "CUTOFF": config['max_context_width'],
-        "ZEROCONF": config['sharding_strategy'] if 'deepspeed' not in config else config['deepspeed'],
+        "ZEROCONF": 'DDP' if 'deepspeed' not in config else config['deepspeed'],
         "MBS": config['per_device_train_batch_size'],
         "ACCUM": config['gradient_accumulation_steps']
     }
     with open(filename, 'w', encoding='utf-8') as f:
-        json.dump(config, f, indent=2, ensure_ascii=False)
+        json.dump(metric_tags, f, indent=2, ensure_ascii=False)
     print(f"配置已保存到: {filename}")
 
 def main():

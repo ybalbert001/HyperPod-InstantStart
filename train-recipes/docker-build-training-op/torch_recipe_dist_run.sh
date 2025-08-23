@@ -14,6 +14,7 @@ PY_NAME=$(basename "$TORCH_RECIPE_PY_PATH")
 cp -r $TORCH_RECIPE_DIRPATH/* ./
 
 echo "处理 MLFlow tags"
+TORCH_RECIPE_PY_PARAMS=$(echo "$TORCH_RECIPE_PY_PARAMS" | sed "s/--run_name \([^ ]*\)/--run_name \1_$(date +"%m%d_%H%M%S")/")
 python torch_process_train_args.py "$TORCH_RECIPE_PY_PARAMS"
 
 [ -f "requirements.txt" ] && pip install -r requirements.txt

@@ -5,7 +5,8 @@
   "nprocPerNode": 2,
   "replicas": 1,
   "efaCount": 1,
-  "entryPythonScriptPath": "/s3/train-recipes/torch-project-gptnx-fsdp/train_gptnx_trainer.py",
-  "pythonScriptParameters": "--model_type gpt_neox \\\n    --hidden_width 768 \\\n    --num_layers 12 \\\n    --num_heads 12 \\\n    --max_context_width 2048 \\\n    --output_dir /ckpt-path/output \\\n    --max_steps 80 \\\n    --per_device_train_batch_size 2 \\\n    --per_device_eval_batch_size 4 \\\n    --gradient_accumulation_steps 2 \\\n    --learning_rate 1e-4 \\\n    --logging_steps 10 \\\n    --save_steps 500 \\\n    --eval_steps 100 \\\n    --save_total_limit 1 \\\n    --bf16 \\\n    --sharding_strategy full \\\n    --activation_checkpointing \\\n    --dataset_name wikitext \\\n    --dataset_config_name wikitext-2-raw-v1 \\\n    --max_train_samples 2000 \\\n    --max_eval_samples 100 \\\n    --tokenizer_name EleutherAI/gpt-neox-20b \\\n    --report_to mlflow \\\n    --run_name gpt_neox_t1",
-  "mlflowTrackingUri": "arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow"
+  "entryPythonScriptPath": "/s3/train-recipes/torch-project-gpt-ddp/trainer_gpt_ddp.py",
+  "pythonScriptParameters": "    --model_name_or_path gpt2 \\\n    --dataset_name wikitext \\\n    --dataset_config_name wikitext-2-raw-v1 \\\n    --output_dir /ckpt-path \\\n    --num_train_epochs 1 \\\n    --per_device_train_batch_size 4 \\\n    --gradient_accumulation_steps 2 \\\n    --max_steps 100 \\\n    --max_context_width 2048 \\\n    --learning_rate 5e-5 \\\n    --save_steps 100 \\\n    --report_to mlflow \\\n    --run_name gpt2_wiki_train\n   ",
+  "mlflowTrackingUri": "arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow",
+  "logMonitoringConfig": ""
 }

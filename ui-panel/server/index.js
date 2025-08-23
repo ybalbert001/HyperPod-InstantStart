@@ -588,16 +588,11 @@ app.post('/api/deploy', async (req, res) => {
       const encodedModelId = encodeModelIdForLabel(extractedModelId);
       console.log(`Encoded model ID: "${encodedModelId}"`);
 
-      // 根据命令类型选择模板
-      let templateName;
-      if (parsedCommand.commandType === 'sglang') {
-        templateName = 'sglang-template.yaml';
-      } else {
-        // 对于VLLM和自定义命令，都使用VLLM模板
-        templateName = 'vllm-template.yaml';
-      }
+      // 使用统一模板，根据命令类型确定服务引擎
+      const servEngine = parsedCommand.commandType === 'sglang' ? 'sglang' : 'vllm';
+      console.log(`Using service engine: ${servEngine} for command type: ${parsedCommand.commandType}`);
 
-      templatePath = path.join(__dirname, `../templates/${templateName}`);
+      templatePath = path.join(__dirname, '../templates/vllm-sglang-template.yaml');
       const templateContent = await fs.readFile(templatePath, 'utf8');
       
       // 生成HuggingFace token环境变量（如果提供了token）
@@ -610,6 +605,7 @@ app.post('/api/deploy', async (req, res) => {
       
       // 替换模板中的占位符 - 注意顺序：先替换更具体的占位符
       newYamlContent = templateContent
+        .replace(/SERVENGINE/g, servEngine) // 新增：替换服务引擎标识
         .replace(/ENCODED_MODEL_ID/g, encodedModelId) // 先替换ENCODED_MODEL_ID
         .replace(/MODEL_TAG/g, finalModelTag)
         .replace(/MODEL_ID/g, extractedModelId) // 然后替换MODEL_ID

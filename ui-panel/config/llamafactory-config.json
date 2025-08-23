@@ -1,12 +1,11 @@
 {
-  "trainingJobName": "test-job",
-  "instanceType": "ml.g5.12xlarge",
-  "dockerImage": "test-image",
-  "nprocPerNode": 1,
+  "trainingJobName": "lmf-v2",
+  "instanceType": "ml.g6.12xlarge",
+  "dockerImage": "633205212955.dkr.ecr.us-west-2.amazonaws.com/sm-training-op-torch26-smhp-op-v2:latest",
+  "nprocPerNode": 4,
   "replicas": 1,
   "efaCount": 1,
-  "lmfRecipeRunPath": "/test/path",
-  "lmfRecipeYamlFile": "test.yaml",
-  "mlflowTrackingUri": "test-uri",
-  "logMonitoringConfig": "test-log-config"
+  "lmfRecipeRunPath": "/s3/train-recipes/llama-factory-project/",
+  "lmfRecipeYamlFile": "qwen_full_dist_template.yaml",
+  "mlflowTrackingUri": "arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow"
 }

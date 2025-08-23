@@ -78,7 +78,7 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
     } else {
       // 默认VLLM serve命令
       return `vllm serve \\
-/s3/Qwen/Qwen3-0.6B \\
+/s3/Qwen-Qwen3-0.6B \\
 --max-num-seqs 32 \\
 --max-model-len 1280 \\
 --tensor-parallel-size 1 \\

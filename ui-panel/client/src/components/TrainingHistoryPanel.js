@@ -26,7 +26,8 @@ import {
   ExperimentOutlined,
   BarChartOutlined,
   SettingOutlined,
-  ThunderboltOutlined
+  ThunderboltOutlined,
+  DownloadOutlined
 } from '@ant-design/icons';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 
@@ -162,6 +163,103 @@ const TrainingHistoryPanel = () => {
       console.error('Error testing MLflow connection:', error);
       message.error('Failed to test MLflow connection');
     }
+  };
+
+  // CSV下载功能
+  const downloadCSV = () => {
+    if (!trainingHistory || trainingHistory.length === 0) {
+      message.warning('No data to download');
+      return;
+    }
+
+    // 构建CSV头部 - 与表格显示的列完全一致
+    const headers = [
+      'Experiment',
+      'Run Name', 
+      'Status'
+    ];
+
+    // 添加动态tag列的标题
+    const tagColumns = generateTagColumns();
+    tagColumns.forEach(col => {
+      // 从key中提取tag名称，转换为可读格式
+      const tagKey = col.key.replace('tag_', '');
+      
+      // 使用与getFormattedTitle相同的映射逻辑
+      const titleMap = {
+        'instance_type': 'Instance Type',
+        'replica_count': 'Replica Count', 
+        'proc_per_node': 'Proc Per Node',
+        'batch_size': 'Batch Size',
+        'cutoff_len': 'Cutoff Len',
+        'deepspeed_conf': 'Zero Conf'
+      };
+      
+      const title = titleMap[tagKey] || tagKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+      headers.push(title);
+    });
+
+    // 添加其他固定列
+    headers.push('Samples/s', 'Steps/s', 'Start Time', 'Duration');
+
+    // 构建CSV数据行
+    const csvData = trainingHistory.map(record => {
+      const row = [
+        record.experiment_name || '',
+        record.run_name || '',
+        record.status || ''
+      ];
+
+      // 添加tag列的数据
+      tagColumns.forEach(col => {
+        const tagKey = col.key.replace('tag_', '');
+        const tagValue = record.tags?.[tagKey] || '';
+        row.push(tagValue);
+      });
+
+      // 添加其他固定列的数据
+      row.push(
+        formatMetricValue(record.metrics?.train_samples_per_second) || '',
+        formatMetricValue(record.metrics?.train_steps_per_second) || '',
+        formatDateTime(record.start_time) || '',
+        formatDuration(record.duration) || ''
+      );
+
+      return row;
+    });
+
+    // 转换为CSV格式
+    const csvContent = [
+      headers.join(','),
+      ...csvData.map(row => 
+        row.map(cell => {
+          // 处理包含逗号、引号或换行符的单元格
+          const cellStr = String(cell);
+          if (cellStr.includes(',') || cellStr.includes('"') || cellStr.includes('\n')) {
+            return `"${cellStr.replace(/"/g, '""')}"`;
+          }
+          return cellStr;
+        }).join(',')
+      )
+    ].join('\n');
+
+    // 创建下载链接
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    
+    // 生成文件名，包含时间戳
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '');
+    link.setAttribute('download', `hyperpod_instantstart_${timestamp}.csv`);
+    
+    // 触发下载
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    message.success(`Downloaded ${trainingHistory.length} training records to CSV`);
   };
 
   const showRunDetails = (record) => {
@@ -491,6 +589,14 @@ const TrainingHistoryPanel = () => {
               title="Configure MLflow Settings"
             >
               Config
+            </Button>
+            <Button
+              icon={<DownloadOutlined />}
+              onClick={downloadCSV}
+              title="Download training history as CSV"
+              disabled={!trainingHistory || trainingHistory.length === 0}
+            >
+              CSV
             </Button>
             <Button
               icon={<ReloadOutlined />}
