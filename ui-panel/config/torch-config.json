@@ -1,12 +1,12 @@
 {
   "trainingJobName": "torchrecipe-1",
-  "instanceType": "ml.g5.12xlarge",
+  "instanceType": "ml.g6.12xlarge",
   "dockerImage": "633205212955.dkr.ecr.us-west-2.amazonaws.com/sm-training-op-torch26-smhp-op-v2:latest",
   "nprocPerNode": 2,
-  "replicas": 2,
+  "replicas": 1,
   "efaCount": 1,
-  "entryPythonScriptPath": "/s3/training_code/model-training-with-hyperpod-training-operator/gptnx-fsdp/src/train.py",
-  "pythonScriptParameters": "--max_context_width=2048 \\\n    --num_key_value_heads=8 \\\n    --intermediate_size=1024 \\\n    --hidden_width=512 \\\n    --num_layers=32 \\\n    --num_heads=16 \\\n    --model_type=gpt_neox \\\n    --tokenizer=EleutherAI/gpt-neo-1.3B \\\n    --checkpoint_freq=50 \\\n    --validation_freq=100 \\\n    --max_steps=50000 \\\n    --checkpoint_dir=/dfsx/gptnx/checkpoints \\\n    --dataset=allenai/c4 \\\n    --dataset_config_name=en \\\n    --resume_from_checkpoint=/dfsx/gptnx/checkpoints \\\n    --train_batch_size=1 \\\n    --val_batch_size=1 \\\n    --sharding_strategy=full \\\n    --offload_activations=1",
+  "entryPythonScriptPath": "/s3/train-recipes/torch-project/train_gptnx_fsdp.py",
+  "pythonScriptParameters": "--max_context_width=2048 \\\n    --num_key_value_heads=8 \\\n    --intermediate_size=1024 \\\n    --hidden_width=512 \\\n    --num_layers=32 \\\n    --num_heads=16 \\\n    --model_type=gpt_neox \\\n    --tokenizer=EleutherAI/gpt-neo-1.3B \\\n    --checkpoint_freq=50 \\\n    --validation_freq=100 \\\n    --max_steps=50000 \\\n    --checkpoint_dir=/ckpt-path/gptnx/checkpoints \\\n    --dataset=allenai/c4 \\\n    --dataset_config_name=en \\\n    --resume_from_checkpoint=/ckpt-path/gptnx/checkpoints \\\n    --train_batch_size=1 \\\n    --val_batch_size=1 \\\n    --sharding_strategy=full \\\n    --offload_activations=1",
   "mlflowTrackingUri": "arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow",
   "logMonitoringConfig": ""
 }

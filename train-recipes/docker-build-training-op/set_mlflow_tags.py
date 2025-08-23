@@ -6,7 +6,7 @@ import mlflow
 import os
 import sys
 import json
-
+from pathlib import Path
 
 def set_infrastructure_tags():
     """设置基础设施相关的MLflow tags"""
@@ -20,26 +20,51 @@ def set_infrastructure_tags():
 
     experiment_name = os.getenv("MLFLOW_EXPERIMENT_NAME")
     # run_name = os.getenv("MLFLOW_RUN_NAME")
-    
-    with open('lmf_conf_tags.json', 'r') as f:
-        mlflow_lmf_tag_envs = json.load(f)
-    
-    run_name = mlflow_lmf_tag_envs['MLFLOW_RUN']
 
-    print(f"Setting up MLflow tags for experiment: {experiment_name}, run: {run_name}")
-
-    # 基础设施信息
     infra_info = {
-        "instance_type": os.getenv("MLFLOW_TAG_INSTANCETYPE"),
-        "replica_count": os.getenv("MLFLOW_TAG_REPLICAS"),
-        "proc_per_node": os.getenv("MLFLOW_TAG_NPROCPERNODE"),
-        "model": mlflow_lmf_tag_envs['LMF_MODEL'],
-        "dataset": mlflow_lmf_tag_envs['LMF_DATASET'],
-        "cutoff_len": mlflow_lmf_tag_envs['LMF_CUTOFF'],
-        "deepspeed_conf": mlflow_lmf_tag_envs['LMF_DSCONF'],
-        # "micro_batchsize": mlflow_lmf_tag_envs['LMF_MBS'],
-        "batch_size": mlflow_lmf_tag_envs['LMF_MBS'] * int(os.getenv("MLFLOW_TAG_REPLICAS")) * int(os.getenv("MLFLOW_TAG_NPROCPERNODE"))
-    }
+            "instance_type": os.getenv("MLFLOW_TAG_INSTANCETYPE"),
+            "replica_count": os.getenv("MLFLOW_TAG_REPLICAS"),
+            "proc_per_node": os.getenv("MLFLOW_TAG_NPROCPERNODE"),
+        }
+
+
+    # if Path('lmf_conf_tags.json').exists():
+    #     with open('lmf_conf_tags.json', 'r') as f:
+    #         mlflow_lmf_tag_envs = json.load(f)
+        
+    #     run_name = mlflow_lmf_tag_envs['MLFLOW_RUN']
+
+    #     print(f"Setting up MLflow tags for experiment: {experiment_name}, run: {run_name}")
+
+    #     # 基础设施信息
+    #     lfm_info = {
+    #         "model": mlflow_lmf_tag_envs['LMF_MODEL'],
+    #         "dataset": mlflow_lmf_tag_envs['LMF_DATASET'],
+    #         "cutoff_len": mlflow_lmf_tag_envs['LMF_CUTOFF'],
+    #         "deepspeed_conf": mlflow_lmf_tag_envs['LMF_DSCONF'],
+    #         # "micro_batchsize": mlflow_lmf_tag_envs['LMF_MBS'],
+    #         "batch_size": mlflow_lmf_tag_envs['LMF_MBS'] * int(os.getenv("MLFLOW_TAG_REPLICAS")) * int(os.getenv("MLFLOW_TAG_NPROCPERNODE"))
+    #     }
+    #     infra_info.update(lfm_info)
+    
+    if Path('mlflow-tags.json').exists():
+        with open('mlflow-tags.json', 'r') as f:
+            mlflow_metric_tags = json.load(f)
+
+        run_name = mlflow_metric_tags['MLFLOW_RUN']
+
+        gen_info = {
+            "model": mlflow_metric_tags['MODEL'],
+            "dataset": mlflow_metric_tags['DATASET'],
+            "cutoff_len": mlflow_metric_tags['CUTOFF'],
+            "deepspeed_conf": mlflow_metric_tags['DSCONF'],
+            # "micro_batchsize": mlflow_lmf_tag_envs['LMF_MBS'],
+            "batch_size": mlflow_metric_tags['MBS'] * int(os.getenv("MLFLOW_TAG_REPLICAS")) * int(os.getenv("MLFLOW_TAG_NPROCPERNODE"))
+        }
+        
+        infra_info.update(gen_info)
+    else:
+        pass
     
     # 通过experiment_name和run_name查找已存在的run
     client = mlflow.tracking.MlflowClient()

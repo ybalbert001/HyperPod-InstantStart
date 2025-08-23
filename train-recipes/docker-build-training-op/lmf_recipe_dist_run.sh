@@ -23,16 +23,15 @@ echo "完成 LlamaFactory Yaml 适配"
 
 # envsubst < $LMF_RECIPE_YAML_FILE > current_lmf_conf.yaml
 
-# Generate post-train script
-echo "Generating post-train script..."
-cat > post_train.sh << 'EOF'
-#!/bin/bash
-# Post-train script to set MLflow tags in background
-nohup python set_mlflow_tags.py > /tmp/hyperpod/mlflow_tags.log 2>&1 &
-exit 0
-EOF
-
-chmod +x post_train.sh
+# # Generate post-train script
+# echo "Generating post-train script..."
+# cat > post_train.sh << 'EOF'
+# #!/bin/bash
+# # Post-train script to set MLflow tags in background
+# nohup python set_mlflow_tags.py > /tmp/hyperpod/mlflow_tags.log 2>&1 &
+# exit 0
+# EOF
+# chmod +x post_train.sh
 
 # Start training
 hyperpodrun \

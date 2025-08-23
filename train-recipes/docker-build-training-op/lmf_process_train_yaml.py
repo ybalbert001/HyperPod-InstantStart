@@ -75,14 +75,14 @@ def main():
 
     mlflow_lmf_tag_envs = {
         'MLFLOW_RUN': data['run_name'],
-        'LMF_MODEL': data['model_name_or_path'].split('/')[-1],
-        'LMF_DATASET': data['dataset'].split('/')[-1],
-        'LMF_CUTOFF': str(data['cutoff_len']),
-        'LMF_DSCONF': data['deepspeed'].split('/')[-1],
-        'LMF_MBS': data['per_device_train_batch_size']
+        'MODEL': data['model_name_or_path'].split('/')[-1],
+        'DATASET': data['dataset'].split('/')[-1],
+        'CUTOFF': str(data['cutoff_len']),
+        'ZEROCONF': data['deepspeed'].split('/')[-1],
+        'MBS': data['per_device_train_batch_size']
     }
 
-    with open('lmf_conf_tags.json', 'w') as f:
+    with open('mlflow-tags.json', 'w') as f:
         json.dump(mlflow_lmf_tag_envs, f)
 
     print("Parsed MLFlow Tags")

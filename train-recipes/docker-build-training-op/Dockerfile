@@ -32,8 +32,10 @@ RUN apt-get update && apt-get install -y gettext-base && rm -rf /var/lib/apt/lis
 RUN pip install PyYAML
 
 COPY lmf_process_train_yaml.py ./lmf_process_train_yaml.py
-COPY set_mlflow_tags.py ./set_mlflow_tags.py
 COPY lmf_recipe_dist_run.sh ./lmf_recipe_dist_run.sh
 COPY torch_recipe_dist_run.sh ./torch_recipe_dist_run.sh
-
 COPY script_recipe_dist_run.sh ./script_recipe_dist_run.sh
+COPY set_mlflow_tags.py ./set_mlflow_tags.py
+COPY post_train.sh ./post_train.sh
+
+RUN chmod +x *.sh

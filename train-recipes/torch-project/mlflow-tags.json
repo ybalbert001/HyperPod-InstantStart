@@ -1,0 +1,8 @@
+{
+    "MLFLOW_RUN": "bs-test",
+    "MODEL": "gptnx-1.3b",
+    "DATASET": "c4_en",
+    "CUTOFF": "2048",
+    "ZEROCONF": "fsdp-full",
+    "MBS": "1"
+}

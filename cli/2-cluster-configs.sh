@@ -91,6 +91,8 @@ for SUBNET_ID in $PUBLIC_SUBNETS; do
     aws ec2 create-tags --resources $SUBNET_ID --tags Key=kubernetes.io/role/elb,Value=1
 done
 
+kubectl create serviceaccount mlflow-service-account
+
 echo ""
 echo "=========================================================================="
 echo ""
