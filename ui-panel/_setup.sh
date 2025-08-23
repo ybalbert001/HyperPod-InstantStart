@@ -75,10 +75,10 @@ EOF
     echo "📝 Created .env file"
 fi
 
-echo ""
-echo "🎉 Setup completed successfully!"
-echo ""
-echo "🚀 To start the application (will auto-activate Python env):"
-echo "   ./start.sh"
-echo ""
-echo "📊 Dashboard will be available at: http://localhost:3000"
+# echo ""
+# echo "🎉 Setup completed successfully!"
+# echo ""
+# echo "🚀 To start the application (will auto-activate Python env):"
+# echo "   ./start.sh"
+# echo ""
+# echo "📊 Dashboard will be available at: http://localhost:3000"

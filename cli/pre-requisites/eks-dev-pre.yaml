@@ -176,6 +176,12 @@ Resources:
           ./get_helm.sh
           rm get_helm.sh
           
+          # Install Session Manager Plugin
+          echo "Installing Session Manager Plugin..."
+          curl "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb" -o "session-manager-plugin.deb"
+          dpkg -i session-manager-plugin.deb
+          rm session-manager-plugin.deb
+          
           # Verify installations
           echo "Verifying installations..."
           
@@ -183,6 +189,7 @@ Resources:
           # kubectl version --client
           # eksctl version
           # helm version
+          # session-manager-plugin
           
           # Set proper ownership for ubuntu user home directory
           chown -R ubuntu:ubuntu /home/ubuntu/

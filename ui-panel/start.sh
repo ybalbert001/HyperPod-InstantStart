@@ -2,7 +2,9 @@
 
 # Model Deployment UI 启动脚本
 
-./_setup.sh
+if [ ! -f ".env" ]; then
+    ./_setup.sh
+fi
 
 echo "🚀 Starting Model Deployment Management Dashboard..."
 
@@ -102,6 +104,60 @@ else
     echo "⚠️  Some ports are still occupied, but continuing..."
 fi
 
+# SSM端口转发设置
+echo "🔗 Setting up SSM port forwarding..."
+
+# 获取当前实例的region和instance ID
+REGION=$(aws configure get region 2>/dev/null)
+TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" 2>/dev/null)
+INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" -s http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null)
+
+if [ -z "$REGION" ] || [ -z "$INSTANCE_ID" ]; then
+    echo "⚠️  Failed to get region or instance ID, skipping SSM setup"
+    echo "   Region: $REGION, Instance ID: $INSTANCE_ID"
+else
+    echo "📍 Region: $REGION, Instance ID: $INSTANCE_ID"
+    
+    # 检查是否已有SSM端口转发在运行
+    SSM_RUNNING=false
+    if pgrep -f "start-session.*$INSTANCE_ID.*3099" > /dev/null; then
+        echo "✅ SSM port forwarding already running on port 3099"
+        SSM_RUNNING=true
+    elif lsof -ti :3099 >/dev/null 2>&1; then
+        echo "⚠️  Port 3099 is occupied by another process, cleaning up..."
+        lsof -ti :3099 | xargs kill -9 2>/dev/null || true
+        sleep 2
+    fi
+    
+    # 如果没有运行，启动SSM端口转发
+    if [ "$SSM_RUNNING" = false ]; then
+        echo "🚀 Starting SSM port forwarding (3000 -> 3099)..."
+        
+        # 检查session-manager-plugin是否可用
+        if command -v session-manager-plugin >/dev/null 2>&1; then
+            # 在后台启动SSM端口转发
+            nohup aws ssm start-session --target "$INSTANCE_ID" \
+                --document-name AWS-StartPortForwardingSession \
+                --parameters "{\"portNumber\":[\"3000\"],\"localPortNumber\":[\"3099\"]}" \
+                --region "$REGION" \
+                > logs/ssm-tunnel.log 2>&1 &
+            
+            # 等待一下确认启动
+            sleep 3
+            
+            if pgrep -f "start-session.*$INSTANCE_ID.*3099" > /dev/null; then
+                echo "✅ SSM port forwarding started successfully"
+                echo "🌐 Access your app from external browser at: http://localhost:3099"
+            else
+                echo "⚠️  SSM port forwarding may have failed, check logs/ssm-tunnel.log"
+            fi
+        else
+            echo "⚠️  session-manager-plugin not found, skipping SSM setup"
+            echo "   Install with: sudo dpkg -i session-manager-plugin.deb"
+        fi
+    fi
+fi
+
 # 检查依赖是否已安装
 if [ ! -d "node_modules" ] || [ ! -d "client/node_modules" ]; then
     echo "📦 Installing dependencies..."
@@ -135,7 +191,7 @@ wait $SERVER_PID 2>/dev/null
 sleep 1
 
 echo "🌟 Starting services..."
-echo "📊 Dashboard will be available at: http://localhost:3000"
+echo "📊 Dashboard will be available at: http://localhost:3099"
 echo "🔌 API server will run on: http://localhost:3001"
 echo "🔄 WebSocket server will run on: ws://localhost:8081"
 echo ""
