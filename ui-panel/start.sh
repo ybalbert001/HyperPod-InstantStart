@@ -2,11 +2,15 @@
 
 # Model Deployment UI 启动脚本
 
+# 端口配置 - 可通过环境变量或命令行参数覆盖
+LOCAL_FORWARD_PORT=${1:-${LOCAL_FORWARD_PORT:-3099}}
+
 if [ ! -f ".env" ]; then
     ./_setup.sh
 fi
 
 echo "🚀 Starting Model Deployment Management Dashboard..."
+echo "🔧 Using local forward port: $LOCAL_FORWARD_PORT"
 
 # 检查Node.js版本
 if ! command -v node &> /dev/null; then
@@ -120,36 +124,36 @@ else
     
     # 检查是否已有SSM端口转发在运行
     SSM_RUNNING=false
-    if pgrep -f "start-session.*$INSTANCE_ID.*3099" > /dev/null; then
-        echo "✅ SSM port forwarding already running on port 3099"
+    if pgrep -f "start-session.*$INSTANCE_ID.*$LOCAL_FORWARD_PORT" > /dev/null; then
+        echo "✅ SSM port forwarding already running on port $LOCAL_FORWARD_PORT"
         SSM_RUNNING=true
-    elif lsof -ti :3099 >/dev/null 2>&1; then
-        echo "⚠️  Port 3099 is occupied by another process, cleaning up..."
-        lsof -ti :3099 | xargs kill -9 2>/dev/null || true
+    elif lsof -ti :$LOCAL_FORWARD_PORT >/dev/null 2>&1; then
+        echo "⚠️  Port $LOCAL_FORWARD_PORT is occupied by another process, cleaning up..."
+        lsof -ti :$LOCAL_FORWARD_PORT | xargs kill -9 2>/dev/null || true
         sleep 2
     fi
     
     # 如果没有运行，启动SSM端口转发
     if [ "$SSM_RUNNING" = false ]; then
-        echo "🚀 Starting SSM port forwarding (3000 -> 3099)..."
+        echo "🚀 Starting SSM port forwarding (3000 -> $LOCAL_FORWARD_PORT)..."
         
         # 检查session-manager-plugin是否可用
         if command -v session-manager-plugin >/dev/null 2>&1; then
             # 在后台启动SSM端口转发
             nohup aws ssm start-session --target "$INSTANCE_ID" \
                 --document-name AWS-StartPortForwardingSession \
-                --parameters "{\"portNumber\":[\"3000\"],\"localPortNumber\":[\"3099\"]}" \
+                --parameters "{\"portNumber\":[\"3000\"],\"localPortNumber\":[\"$LOCAL_FORWARD_PORT\"]}" \
                 --region "$REGION" \
-                > logs/ssm-tunnel.log 2>&1 &
+                > logs/ssm-tunnel-$LOCAL_FORWARD_PORT.log 2>&1 &
             
             # 等待一下确认启动
             sleep 3
             
-            if pgrep -f "start-session.*$INSTANCE_ID.*3099" > /dev/null; then
+            if pgrep -f "start-session.*$INSTANCE_ID.*$LOCAL_FORWARD_PORT" > /dev/null; then
                 echo "✅ SSM port forwarding started successfully"
-                echo "🌐 Access your app from external browser at: http://localhost:3099"
+                echo "🌐 Access your app from external browser at: http://localhost:$LOCAL_FORWARD_PORT"
             else
-                echo "⚠️  SSM port forwarding may have failed, check logs/ssm-tunnel.log"
+                echo "⚠️  SSM port forwarding may have failed, check logs/ssm-tunnel-$LOCAL_FORWARD_PORT.log"
             fi
         else
             echo "⚠️  session-manager-plugin not found, skipping SSM setup"
@@ -191,7 +195,7 @@ wait $SERVER_PID 2>/dev/null
 sleep 1
 
 echo "🌟 Starting services..."
-echo "📊 Dashboard will be available at: http://localhost:3099"
+echo "📊 Dashboard will be available at: http://localhost:$LOCAL_FORWARD_PORT"
 echo "🔌 API server will run on: http://localhost:3001"
 echo "🔄 WebSocket server will run on: ws://localhost:8081"
 echo ""
