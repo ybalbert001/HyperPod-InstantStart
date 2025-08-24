@@ -1,3 +1,14 @@
 {
-  "tracking_uri": "arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow"
+  "tracking_uri": "arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow",
+  "experiment_id": "torchrecipe-4",
+  "sync_configs": {
+    "contributor_name": "john",
+    "source_mlflow_arn": "arn:aws:sagemaker:us-west-2:123456789012:mlflow-tracking-server/john-research-mlflow",
+    "shared_account_id": "987654321098",
+    "shared_aws_region": "us-west-2",
+    "cross_account_role_arn": "arn:aws:iam::987654321098:role/MLflowSync-CrossAccount-john",
+    "shared_mlflow_arn": "arn:aws:sagemaker:us-west-2:987654321098:mlflow-tracking-server/shared-mlflow-server",
+    "setup_date": "2024-08-24T06:25:00Z",
+    "last_sync": "2024-08-24T06:25:00Z"
+  }
 }

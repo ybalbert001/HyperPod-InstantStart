@@ -41,10 +41,10 @@ const TrainingHistoryPanel = () => {
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [hasInitialLoad, setHasInitialLoad] = useState(false); // 添加初始加载标识
   const [configModalVisible, setConfigModalVisible] = useState(false);
-  const [mlflowConfig, setMlflowConfig] = useState({
-    tracking_uri: 'arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow3'
-  });
+  const [mlflowConfig, setMlflowConfig] = useState({});
   const [configForm] = Form.useForm();
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [syncForm] = Form.useForm();
 
   const fetchTrainingHistory = async () => {
     setLoading(true);
@@ -93,15 +93,18 @@ const TrainingHistoryPanel = () => {
       if (result.success) {
         setMlflowConfig(result.config);
         configForm.setFieldsValue(result.config);
+      } else {
+        // 如果获取失败，使用空配置
+        const emptyConfig = {};
+        setMlflowConfig(emptyConfig);
+        configForm.setFieldsValue(emptyConfig);
       }
     } catch (error) {
       console.error('Error fetching MLflow config:', error);
-      // 使用默认配置
-      const defaultConfig = {
-        tracking_uri: 'arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow3'
-      };
-      setMlflowConfig(defaultConfig);
-      configForm.setFieldsValue(defaultConfig);
+      // 如果出错，使用空配置
+      const emptyConfig = {};
+      setMlflowConfig(emptyConfig);
+      configForm.setFieldsValue(emptyConfig);
     }
   };
 
@@ -137,6 +140,37 @@ const TrainingHistoryPanel = () => {
   const showConfigModal = () => {
     configForm.setFieldsValue(mlflowConfig);
     setConfigModalVisible(true);
+  };
+
+  // 同步到共享MLflow服务器
+  const syncToSharedMLflow = async (values) => {
+    setSyncLoading(true);
+    try {
+      const response = await fetch('/api/mlflow-sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sync_config: values.sync_config,
+          experiment_id: values.experiment_id
+        }),
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        message.success('Successfully synced to shared MLflow server');
+        syncForm.resetFields();
+      } else {
+        message.error(`Sync failed: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Error syncing to shared MLflow:', error);
+      message.error('Failed to sync to shared MLflow server');
+    } finally {
+      setSyncLoading(false);
+    }
   };
 
   // 测试MLflow连接
@@ -783,21 +817,11 @@ const TrainingHistoryPanel = () => {
         open={configModalVisible}
         onCancel={() => setConfigModalVisible(false)}
         footer={[
-          <Button key="test" onClick={testMlflowConnection}>
-            Test Connection
-          </Button>,
           <Button key="cancel" onClick={() => setConfigModalVisible(false)}>
             Cancel
-          </Button>,
-          <Button 
-            key="save" 
-            type="primary" 
-            onClick={() => configForm.submit()}
-          >
-            Save
           </Button>
         ]}
-        width={600}
+        width={800}
       >
         <Form
           form={configForm}
@@ -806,7 +830,7 @@ const TrainingHistoryPanel = () => {
           initialValues={mlflowConfig}
         >
           <Form.Item
-            label="MLflow Tracking Server URI"
+            label="MLflow Tracking Server URI for Display"
             name="tracking_uri"
             rules={[
               { required: true, message: 'Please enter the MLflow tracking server URI' },
@@ -817,8 +841,7 @@ const TrainingHistoryPanel = () => {
             ]}
             extra="Enter the MLflow tracking server URI. For AWS SageMaker, use ARN format."
           >
-            <Input.TextArea
-              rows={3}
+            <Input
               placeholder="arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow3"
             />
           </Form.Item>
@@ -834,10 +857,115 @@ const TrainingHistoryPanel = () => {
               💡 Configuration Tips:
             </Typography.Text>
             <ul style={{ marginTop: '8px', marginBottom: '0', color: '#52c41a' }}>
-              <li><strong>AWS SageMaker:</strong> Use ARN format starting with "arn:aws:sagemaker:"</li>
-              <li><strong>Local MLflow:</strong> Use "http://localhost:5000" or your server URL</li>
-              <li><strong>Remote MLflow:</strong> Use "https://your-mlflow-server.com"</li>
+              <li><strong>AWS SageMaker MLFlow Tracking Server ARN:</strong> ARN format starting with "arn:aws:sagemaker:"</li>
+              <li><strong>Your own SageMaker MLFlow Arn or Shared Arn for Display.</strong></li>
             </ul>
+          </div>
+
+          {/* 第一个区块的按钮 */}
+          <div style={{ marginTop: '16px', textAlign: 'right' }}>
+            <Space>
+              <Button onClick={testMlflowConnection}>
+                Test Connection
+              </Button>
+              <Button type="primary" onClick={() => configForm.submit()}>
+                Save
+              </Button>
+            </Space>
+          </div>
+
+          {/* 跨账户同步功能区域 */}
+          <div style={{ 
+            marginTop: '24px',
+            padding: '16px',
+            backgroundColor: '#f0f8ff',
+            border: '1px solid #d6e4ff',
+            borderRadius: '8px'
+          }}>
+            <Typography.Title level={5} style={{ color: '#1890ff', marginBottom: '16px' }}>
+              <Space>
+                <ThunderboltOutlined style={{ color: '#1890ff' }} />
+                Cross-Account MLflow Sync
+              </Space>
+            </Typography.Title>
+            
+            <Form
+              form={syncForm}
+              layout="vertical"
+              onFinish={syncToSharedMLflow}
+            >
+              <Form.Item
+                label="Sync Configuration JSON"
+                name="sync_config"
+                rules={[
+                  { required: true, message: 'Please enter the sync configuration JSON' },
+                  {
+                    validator: (_, value) => {
+                      if (!value) return Promise.resolve();
+                      try {
+                        const parsed = JSON.parse(value);
+                        const requiredFields = ['contributor_name', 'source_mlflow_arn', 'shared_account_id', 'shared_aws_region', 'cross_account_role_arn', 'shared_mlflow_arn'];
+                        const missingFields = requiredFields.filter(field => !parsed[field]);
+                        if (missingFields.length > 0) {
+                          return Promise.reject(new Error(`Missing required fields: ${missingFields.join(', ')}`));
+                        }
+                        
+                        // 验证source和destination ARN不能相同
+                        if (parsed.source_mlflow_arn === parsed.shared_mlflow_arn) {
+                          return Promise.reject(new Error('Source MLflow ARN and Shared MLflow ARN cannot be the same. Please ensure you are syncing to a different MLflow server.'));
+                        }
+                        
+                        return Promise.resolve();
+                      } catch (e) {
+                        return Promise.reject(new Error('Invalid JSON format'));
+                      }
+                    }
+                  }
+                ]}
+                extra="JSON configuration for cross-account sync"
+              >
+                <Input.TextArea
+                  rows={8}
+                  placeholder={`{
+  "contributor_name": "john",
+  "source_mlflow_arn": "arn:aws:sagemaker:us-west-2:123456789012:mlflow-tracking-server/john-research-mlflow",
+  "shared_account_id": "987654321098",
+  "shared_aws_region": "us-west-2",
+  "cross_account_role_arn": "arn:aws:iam::987654321098:role/MLflowSync-CrossAccount-john",
+  "shared_mlflow_arn": "arn:aws:sagemaker:us-west-2:987654321098:mlflow-tracking-server/shared-mlflow-server",
+  "setup_date": "2024-08-24T05:46:00Z"
+}`}
+                />
+              </Form.Item>
+
+              <Form.Item
+                label="Experiment ID"
+                name="experiment_id"
+                rules={[
+                  { required: true, message: 'Please enter the experiment ID to sync' }
+                ]}
+                extra="The experiment ID from your MLflow server to sync"
+              >
+                <Input placeholder="torchrecipe-4 or 123456789" />
+              </Form.Item>
+
+              <Form.Item style={{ marginBottom: 0 }}>
+                <Button 
+                  type="primary" 
+                  htmlType="submit" 
+                  loading={syncLoading}
+                  style={{ 
+                    backgroundColor: '#1890ff',
+                    borderColor: '#1890ff'
+                  }}
+                >
+                  <Space>
+                    <ThunderboltOutlined />
+                    Sync to Shared MLFlow Server
+                  </Space>
+                </Button>
+              </Form.Item>
+            </Form>
           </div>
         </Form>
       </Modal>

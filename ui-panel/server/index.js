@@ -1563,7 +1563,9 @@ if (!fs.existsSync(configDir)) {
 
 // 默认MLflow配置
 const DEFAULT_MLFLOW_CONFIG = {
-  tracking_uri: ''
+  tracking_uri: '',
+  experiment_id: '',
+  sync_configs: {}
 };
 
 // 读取MLflow配置
@@ -1756,6 +1758,165 @@ except Exception as e:
     
   } catch (error) {
     console.error('MLflow connection test error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// MLflow跨账户同步API
+app.post('/api/mlflow-sync', async (req, res) => {
+  try {
+    const { sync_config, experiment_id } = req.body;
+    
+    // 验证必需字段
+    if (!sync_config || !experiment_id) {
+      return res.status(400).json({
+        success: false,
+        error: 'sync_config and experiment_id are required'
+      });
+    }
+
+    // 验证JSON配置
+    let configObj;
+    try {
+      configObj = JSON.parse(sync_config);
+    } catch (e) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid JSON format in sync_config'
+      });
+    }
+
+    // 验证必需的配置字段
+    const requiredFields = ['contributor_name', 'source_mlflow_arn', 'shared_account_id', 'shared_aws_region', 'cross_account_role_arn', 'shared_mlflow_arn'];
+    const missingFields = requiredFields.filter(field => !configObj[field]);
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: `Missing required fields in sync_config: ${missingFields.join(', ')}`
+      });
+    }
+
+    // 验证source和destination ARN不能相同
+    if (configObj.source_mlflow_arn === configObj.shared_mlflow_arn) {
+      return res.status(400).json({
+        success: false,
+        error: 'Source MLflow ARN and Shared MLflow ARN cannot be the same. Please ensure you are syncing to a different MLflow server.'
+      });
+    }
+
+    // 添加时间戳
+    configObj.setup_date = new Date().toISOString();
+
+    console.log(`Starting MLflow sync for experiment ${experiment_id}...`);
+    
+    // 1. 保存配置到mlflow-metric-config.json
+    const currentConfig = readMlflowConfig();
+    const updatedConfig = {
+      ...currentConfig,
+      experiment_id: experiment_id,
+      sync_configs: {
+        ...configObj,
+        last_sync: new Date().toISOString()
+      }
+    };
+    
+    if (!saveMlflowConfig(updatedConfig)) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to save sync configuration'
+      });
+    }
+
+    // 2. 创建临时配置文件供Python脚本使用
+    const tempConfigPath = path.join(__dirname, '../temp/sync-config-temp.json');
+    
+    // 确保temp目录存在
+    const tempDir = path.dirname(tempConfigPath);
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+    
+    fs.writeFileSync(tempConfigPath, JSON.stringify(configObj, null, 2));
+
+    // 3. 调用Python同步脚本
+    const { spawn } = require('child_process');
+    const pythonPath = path.join(__dirname, '../.venv/bin/python');
+    const syncScriptPath = path.join(__dirname, '../cli/cross-acct-mlflow-sync.py');
+    
+    const pythonProcess = spawn(pythonPath, [
+      syncScriptPath,
+      '--config-file', tempConfigPath,
+      '--experiment-id', experiment_id
+    ], {
+      cwd: __dirname,
+      env: { ...process.env }
+    });
+    
+    let stdout = '';
+    let stderr = '';
+    
+    pythonProcess.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+    
+    pythonProcess.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+    
+    pythonProcess.on('close', (code) => {
+      // 清理临时配置文件
+      try {
+        fs.unlinkSync(tempConfigPath);
+      } catch (e) {
+        console.warn('Failed to cleanup temp config file:', e);
+      }
+      
+      if (code === 0) {
+        console.log('MLflow sync completed successfully');
+        console.log('Sync output:', stdout);
+        
+        res.json({
+          success: true,
+          message: 'Successfully synced experiment to shared MLflow server',
+          output: stdout,
+          experiment_id: experiment_id,
+          contributor: configObj.contributor_name
+        });
+      } else {
+        console.error('MLflow sync failed with code:', code);
+        console.error('Sync stderr:', stderr);
+        console.error('Sync stdout:', stdout);
+        
+        res.status(500).json({
+          success: false,
+          error: 'MLflow sync failed',
+          details: stderr || stdout,
+          exit_code: code
+        });
+      }
+    });
+    
+    pythonProcess.on('error', (error) => {
+      console.error('Failed to start MLflow sync script:', error);
+      
+      // 清理临时配置文件
+      try {
+        fs.unlinkSync(tempConfigPath);
+      } catch (e) {
+        console.warn('Failed to cleanup temp config file:', e);
+      }
+      
+      res.status(500).json({
+        success: false,
+        error: `Failed to start sync script: ${error.message}`
+      });
+    });
+    
+  } catch (error) {
+    console.error('MLflow sync API error:', error);
     res.status(500).json({
       success: false,
       error: error.message
