@@ -73,7 +73,7 @@ CURRENT_ROLE_NAME=$(echo "$CURRENT_ROLE_ARN" | sed 's/.*role\///g' | sed 's/\/.*
 IAM_ROLE_ARN=arn:aws:iam::$ACCOUNT_ID:role/$CURRENT_ROLE_NAME
 
 aws sagemaker create-mlflow-tracking-server \
-    --tracking-server-name "$CLUSTER_TAG-mlflow-server" \
+    --tracking-server-name $MLFLOW_SERVER_NAME \
     --artifact-store-uri "s3://${DEPLOY_MODEL_S3_BUCKET}" \
     --tracking-server-size "Small" \
     --mlflow-version "3.0" \

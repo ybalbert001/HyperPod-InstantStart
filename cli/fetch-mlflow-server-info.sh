@@ -1,7 +1,7 @@
 source init_envs
 
 CURRENT_ROLE_ARN=$(aws sts get-caller-identity --query Arn --output text)
-CURRENT_ROLE_NAME=$(echo "$CURRENT_ARN" | sed 's/.*role\///g' | sed 's/\/.*//g')
+CURRENT_ROLE_NAME=$(echo "$CURRENT_ROLE_ARN" | sed 's/.*role\///g' | sed 's/\/.*//g')
 IAM_ROLE_ARN=arn:aws:iam::$ACCOUNT_ID:role/$CURRENT_ROLE_NAME
 
 # aws sagemaker create-mlflow-tracking-server \
@@ -17,7 +17,7 @@ IAM_ROLE_ARN=arn:aws:iam::$ACCOUNT_ID:role/$CURRENT_ROLE_NAME
 #     --region ${AWS_REGION}
 
 aws sagemaker describe-mlflow-tracking-server \
-    --tracking-server-name "$HP_CLUSTER_NAME-mlflow-server" \
+    --tracking-server-name $MLFLOW_SERVER_NAME \
     --region ${AWS_REGION} | jq '.' > mlflow-server-info.json
 
 # aws sagemaker describe-mlflow-tracking-server \
