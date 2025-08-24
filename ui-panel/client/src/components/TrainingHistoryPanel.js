@@ -144,7 +144,9 @@ const TrainingHistoryPanel = () => {
 
   // 同步到共享MLflow服务器
   const syncToSharedMLflow = async (values) => {
+    // 阻止表单的默认提交行为
     setSyncLoading(true);
+    
     try {
       const response = await fetch('/api/mlflow-sync', {
         method: 'POST',
@@ -153,7 +155,7 @@ const TrainingHistoryPanel = () => {
         },
         body: JSON.stringify({
           sync_config: values.sync_config,
-          experiment_id: values.experiment_id
+          experiment_name: values.experiment_id  // 注意：这里实际是experiment name
         }),
       });
       
@@ -402,13 +404,21 @@ const TrainingHistoryPanel = () => {
   const generateTagColumns = () => {
     if (!trainingHistory || trainingHistory.length === 0) return [];
     
+    // 定义要过滤掉的tags（不在表格中显示）
+    const hiddenTags = [
+      'source_run_id',           // 用于重复检测，用户不需要看到
+      'source_experiment_name'   // 冗余信息，实验名称已经保持原样
+    ];
+    
     // 收集所有可能的tag键
     const allTagKeys = new Set();
     trainingHistory.forEach(record => {
       if (record.tags) {
         Object.keys(record.tags).forEach(key => {
-          // 过滤掉一些系统内部的tags
-          if (!key.startsWith('mlflow.') && key !== 'mlflow.runName') {
+          // 过滤掉系统内部的tags和我们不想显示的tags
+          if (!key.startsWith('mlflow.') && 
+              key !== 'mlflow.runName' && 
+              !hiddenTags.includes(key)) {
             allTagKeys.add(key);
           }
         });
@@ -893,6 +903,9 @@ const TrainingHistoryPanel = () => {
               form={syncForm}
               layout="vertical"
               onFinish={syncToSharedMLflow}
+              onFinishFailed={(errorInfo) => {
+                console.log('Sync form validation failed:', errorInfo);
+              }}
             >
               <Form.Item
                 label="Sync Configuration JSON"

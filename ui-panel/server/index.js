@@ -1768,13 +1768,16 @@ except Exception as e:
 // MLflow跨账户同步API
 app.post('/api/mlflow-sync', async (req, res) => {
   try {
-    const { sync_config, experiment_id } = req.body;
+    const { sync_config, experiment_name, experiment_id } = req.body;
+    
+    // 支持两种参数格式以保持兼容性
+    const experimentIdentifier = experiment_name || experiment_id;
     
     // 验证必需字段
-    if (!sync_config || !experiment_id) {
+    if (!sync_config || !experimentIdentifier) {
       return res.status(400).json({
         success: false,
-        error: 'sync_config and experiment_id are required'
+        error: 'sync_config and experiment_name (or experiment_id) are required'
       });
     }
 
@@ -1810,13 +1813,13 @@ app.post('/api/mlflow-sync', async (req, res) => {
     // 添加时间戳
     configObj.setup_date = new Date().toISOString();
 
-    console.log(`Starting MLflow sync for experiment ${experiment_id}...`);
+    console.log(`Starting MLflow sync for experiment ${experimentIdentifier}...`);
     
     // 1. 保存配置到mlflow-metric-config.json
     const currentConfig = readMlflowConfig();
     const updatedConfig = {
       ...currentConfig,
-      experiment_id: experiment_id,
+      experiment_id: experimentIdentifier,
       sync_configs: {
         ...configObj,
         last_sync: new Date().toISOString()
@@ -1844,12 +1847,12 @@ app.post('/api/mlflow-sync', async (req, res) => {
     // 3. 调用Python同步脚本
     const { spawn } = require('child_process');
     const pythonPath = path.join(__dirname, '../.venv/bin/python');
-    const syncScriptPath = path.join(__dirname, '../cli/cross-acct-mlflow-sync.py');
+    const syncScriptPath = path.join(__dirname, '../mlflow/cross_account_sync.py');
     
     const pythonProcess = spawn(pythonPath, [
       syncScriptPath,
       '--config-file', tempConfigPath,
-      '--experiment-id', experiment_id
+      '--experiment-name', experimentIdentifier
     ], {
       cwd: __dirname,
       env: { ...process.env }
@@ -1882,7 +1885,7 @@ app.post('/api/mlflow-sync', async (req, res) => {
           success: true,
           message: 'Successfully synced experiment to shared MLflow server',
           output: stdout,
-          experiment_id: experiment_id,
+          experiment_id: experimentIdentifier,
           contributor: configObj.contributor_name
         });
       } else {
