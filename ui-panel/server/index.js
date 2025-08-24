@@ -1120,7 +1120,7 @@ app.get('/api/script-config/load', async (req, res) => {
     if (!fs.existsSync(configPath)) {
       // 返回默认配置
       const defaultConfig = {
-        trainingJobName: 'hyperpodpytorchjob-script-1',
+        trainingJobName: 'hypd-recipe-script-1',
         dockerImage: '633205212955.dkr.ecr.us-west-2.amazonaws.com/sm-training-op-torch26-smhp-op:latest',
         instanceType: 'ml.g5.12xlarge',
         nprocPerNode: 1,
@@ -1361,7 +1361,7 @@ app.get('/api/torch-config/load', async (req, res) => {
     if (!fs.existsSync(configPath)) {
       // 返回默认配置
       const defaultConfig = {
-        trainingJobName: 'hyperpodpytorchjob-torch-1',
+        trainingJobName: 'hypd-recipe-torch-1',
         dockerImage: '633205212955.dkr.ecr.us-west-2.amazonaws.com/sm-training-op-torch26-smhp-op:latest',
         instanceType: 'ml.g5.12xlarge',
         nprocPerNode: 1,

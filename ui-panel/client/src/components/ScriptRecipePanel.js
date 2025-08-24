@@ -184,7 +184,7 @@ const ScriptRecipePanel = ({ onLaunch, deploymentStatus }) => {
         layout="vertical"
         onFinish={handleSubmit}
         initialValues={{
-          trainingJobName: 'hyperpodpytorchjob-script-1',
+          trainingJobName: 'hypd-recipe-script-1',
           dockerImage: '633205212955.dkr.ecr.us-west-2.amazonaws.com/sm-training-op-torch26-smhp-op:latest',
           instanceType: 'ml.g5.12xlarge',
           nprocPerNode: 1,
@@ -212,7 +212,7 @@ const ScriptRecipePanel = ({ onLaunch, deploymentStatus }) => {
                 { pattern: /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/, message: 'Invalid job name format' }
               ]}
             >
-              <Input placeholder="hyperpodpytorchjob-script-1" />
+              <Input placeholder="hypd-recipe-script-1" />
             </Form.Item>
           </Col>
           <Col span={12}>

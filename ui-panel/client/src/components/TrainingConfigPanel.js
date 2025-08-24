@@ -195,7 +195,7 @@ const TrainingConfigPanel = ({ onLaunch, deploymentStatus }) => {
                 { pattern: /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/, message: 'Invalid job name format' }
               ]}
             >
-              <Input placeholder="hyperpodpytorchjob-1" />
+              <Input placeholder="torchrecipe-1" />
             </Form.Item>
           </Col>
           <Col span={12}>

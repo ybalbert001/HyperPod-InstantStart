@@ -138,7 +138,28 @@ const TrainingHistoryPanel = () => {
 
   // 显示配置Modal
   const showConfigModal = () => {
+    // 设置MLflow URI配置表单
     configForm.setFieldsValue(mlflowConfig);
+    
+    // 设置跨账户同步表单
+    if (mlflowConfig.sync_configs) {
+      // 从sync_configs构建JSON字符串
+      const syncConfigJson = JSON.stringify({
+        contributor_name: mlflowConfig.sync_configs.contributor_name,
+        source_mlflow_arn: mlflowConfig.sync_configs.source_mlflow_arn,
+        shared_account_id: mlflowConfig.sync_configs.shared_account_id,
+        shared_aws_region: mlflowConfig.sync_configs.shared_aws_region,
+        cross_account_role_arn: mlflowConfig.sync_configs.cross_account_role_arn,
+        shared_mlflow_arn: mlflowConfig.sync_configs.shared_mlflow_arn,
+        setup_date: mlflowConfig.sync_configs.setup_date
+      }, null, 2); // 格式化JSON，缩进2个空格
+      
+      syncForm.setFieldsValue({
+        sync_config: syncConfigJson,
+        experiment_id: mlflowConfig.experiment_id
+      });
+    }
+    
     setConfigModalVisible(true);
   };
 
