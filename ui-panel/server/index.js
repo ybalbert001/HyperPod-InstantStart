@@ -3405,19 +3405,73 @@ app.get('/api/cluster/mlflow-info', (req, res) => {
     const mlflowInfoPath = path.join(configDir, 'mlflow-server-info.json');
     
     if (fs.existsSync(mlflowInfoPath)) {
-      const mlflowInfo = JSON.parse(fs.readFileSync(mlflowInfoPath, 'utf8'));
+      const fileContent = fs.readFileSync(mlflowInfoPath, 'utf8').trim();
+      
+      // 检查文件是否为空
+      if (!fileContent) {
+        return res.json({
+          success: true,
+          data: {
+            status: 'not_found',
+            error: 'MLflow server info file is empty',
+            clusterTag: activeCluster
+          }
+        });
+      }
+      
+      let mlflowInfo;
+      try {
+        mlflowInfo = JSON.parse(fileContent);
+      } catch (parseError) {
+        return res.json({
+          success: true,
+          data: {
+            status: 'error',
+            error: 'Invalid JSON in MLflow server info file',
+            clusterTag: activeCluster
+          }
+        });
+      }
+      
+      // 检查解析后的对象是否为空或无效
+      if (!mlflowInfo || Object.keys(mlflowInfo).length === 0) {
+        return res.json({
+          success: true,
+          data: {
+            status: 'not_found',
+            error: 'MLflow server info is empty',
+            clusterTag: activeCluster
+          }
+        });
+      }
+      
+      // 返回前端期望的数据结构
       res.json({
         success: true,
         data: {
-          ...mlflowInfo,
-          clusterTag: activeCluster
+          status: 'found',
+          trackingServerArn: mlflowInfo.TrackingServerArn,
+          trackingServerName: mlflowInfo.TrackingServerName,
+          trackingServerUrl: mlflowInfo.TrackingServerUrl,
+          trackingServerStatus: mlflowInfo.TrackingServerStatus,
+          isActive: mlflowInfo.IsActive,
+          mlflowVersion: mlflowInfo.MlflowVersion,
+          artifactStoreUri: mlflowInfo.ArtifactStoreUri,
+          trackingServerSize: mlflowInfo.TrackingServerSize,
+          roleArn: mlflowInfo.RoleArn,
+          creationTime: mlflowInfo.CreationTime,
+          clusterTag: activeCluster,
+          rawData: mlflowInfo // 保留原始数据以备调试
         }
       });
     } else {
       res.json({
-        success: false,
-        error: `MLflow server info not found for cluster: ${activeCluster}`,
-        clusterTag: activeCluster
+        success: true,
+        data: {
+          status: 'not_found',
+          error: `MLflow server info not found for cluster: ${activeCluster}`,
+          clusterTag: activeCluster
+        }
       });
     }
   } catch (error) {

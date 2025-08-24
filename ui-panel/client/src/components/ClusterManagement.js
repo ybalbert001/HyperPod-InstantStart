@@ -969,10 +969,23 @@ const ClusterManagement = () => {
                               ) : mlflowInfo.status === 'not_found' ? (
                                 <div style={{ marginTop: '4px' }}>
                                   <Tag color="processing" size="small">Creating...</Tag>
+                                  <Text type="secondary" style={{ fontSize: '11px', marginLeft: '8px' }}>
+                                    MLflow server info not available yet
+                                  </Text>
+                                </div>
+                              ) : mlflowInfo.status === 'error' ? (
+                                <div style={{ marginTop: '4px' }}>
+                                  <Tag color="error" size="small">Error</Tag>
+                                  <Text type="secondary" style={{ fontSize: '11px', marginLeft: '8px' }}>
+                                    {mlflowInfo.error || 'Failed to load MLflow info'}
+                                  </Text>
                                 </div>
                               ) : (
                                 <div style={{ marginTop: '4px' }}>
-                                  <Tag color="orange" size="small">Error loading MLFlow info</Tag>
+                                  <Tag color="orange" size="small">Unknown Status</Tag>
+                                  <Text type="secondary" style={{ fontSize: '11px', marginLeft: '8px' }}>
+                                    Unexpected MLflow status: {mlflowInfo.status}
+                                  </Text>
                                 </div>
                               )
                             ) : (

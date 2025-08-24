@@ -443,10 +443,10 @@ export AWS_AZ=$(aws ec2 describe-availability-zones --region $AWS_REGION --query
         } else {
           console.log('Configure script started successfully');
           
-          // 10秒后开始监控并备份生成的文件
+          // 30秒后开始监控并备份生成的文件（给MLflow查询足够时间）
           setTimeout(() => {
             this.clusterManager.backupGeneratedFiles(activeCluster, 'step2');
-          }, 10000);
+          }, 30000);
         }
       });
 
