@@ -14,3 +14,7 @@ export DEPLOY_MODEL_S3_BUCKET=cluster-mount-$CLUSTER_TAG
 export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 export STACK_ID=$CLOUD_FORMATION_FULL_STACK_NAME
 export AWS_AZ=$(aws ec2 describe-availability-zones --region $AWS_REGION --query "AvailabilityZones[?ZoneName=='$GPU_CAPACITY_AZ'].ZoneId" --output text)
+
+export CURRENT_ROLE_ARN=$(aws sts get-caller-identity --query Arn --output text)
+export CURRENT_ROLE_NAME=$(echo "$CURRENT_ROLE_ARN" | sed 's/.*role\///g' | sed 's/\/.*//g')
+export IAM_ROLE_ARN=arn:aws:iam::$ACCOUNT_ID:role/$CURRENT_ROLE_NAME
