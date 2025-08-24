@@ -5,7 +5,7 @@
 # 端口配置 - 可通过环境变量或命令行参数覆盖
 LOCAL_FORWARD_PORT=${1:-${LOCAL_FORWARD_PORT:-3099}}
 
-if [ ! -f ".env" ]; then
+if [ ! -f ".venv/" ]; then
     ./_setup.sh
 fi
 
