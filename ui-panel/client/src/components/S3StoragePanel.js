@@ -114,7 +114,6 @@ const S3StoragePanel = () => {
           {bucketInfo && (
             <Card size="small" style={{ backgroundColor: '#f0f9ff', border: '1px solid #91d5ff' }}>
               <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                <Text strong>Bucket Information:</Text>
                 <Text style={{ fontSize: '12px' }}>
                   <strong>Bucket:</strong> {bucketInfo.bucket}
                 </Text>

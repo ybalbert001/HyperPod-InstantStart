@@ -1,12 +1,11 @@
 {
-  "trainingJobName": "torchrecipe-1",
+  "trainingJobName": "torchrecipe-3",
   "instanceType": "ml.g6.12xlarge",
   "dockerImage": "633205212955.dkr.ecr.us-west-2.amazonaws.com/sm-training-op-torch26-smhp-op-v2:latest",
   "nprocPerNode": 2,
   "replicas": 1,
   "efaCount": 1,
   "entryPythonScriptPath": "/s3/train-recipes/torch-project-gpt-ddp/trainer_gpt_ddp.py",
-  "pythonScriptParameters": "    --model_name_or_path gpt2 \\\n    --dataset_name wikitext \\\n    --dataset_config_name wikitext-2-raw-v1 \\\n    --output_dir /ckpt-path \\\n    --num_train_epochs 1 \\\n    --per_device_train_batch_size 4 \\\n    --gradient_accumulation_steps 2 \\\n    --max_steps 100 \\\n    --max_context_width 2048 \\\n    --learning_rate 5e-5 \\\n    --save_steps 100 \\\n    --report_to mlflow \\\n    --run_name gpt2_wiki_train\n   ",
-  "mlflowTrackingUri": "arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow",
-  "logMonitoringConfig": ""
+  "pythonScriptParameters": "    --model_name_or_path facebook/opt-350m \\\n    --dataset_name wikitext \\\n    --dataset_config_name wikitext-2-raw-v1 \\\n    --output_dir /ckpt-path \\\n    --num_train_epochs 1 \\\n    --per_device_train_batch_size 4 \\\n    --gradient_accumulation_steps 2 \\\n    --max_steps 100 \\\n    --max_context_width 2048 \\\n    --learning_rate 5e-5 \\\n    --save_steps 100 \\\n    --report_to mlflow \\\n    --run_name opt03b_wiki_train",
+  "mlflowTrackingUri": "arn:aws:sagemaker:us-west-2:633205212955:mlflow-tracking-server/pdx-mlflow"
 }

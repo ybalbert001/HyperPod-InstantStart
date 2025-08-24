@@ -1046,14 +1046,14 @@ app.get('/api/llamafactory-config/load', async (req, res) => {
     if (!fs.existsSync(configPath)) {
       // 返回默认配置
       const defaultConfig = {
-        trainingJobName: 'hyperpodpytorchjob-1',
-        dockerImage: '633205212955.dkr.ecr.us-west-2.amazonaws.com/sm-training-op-torch26-smhp-op:latest',
+        trainingJobName: 'torchrecipe-1',
+        dockerImage: 'ACCOUNTID.dkr.ecr.REGION.amazonaws.com/REPONAME:latest',
         instanceType: 'ml.g5.12xlarge',
         nprocPerNode: 1,
         replicas: 1,
         efaCount: 16,
-        lmfRecipeRunPath: '/s3/training_code/model-training-with-hyperpod-training-operator/llama-factory-project/',
-        lmfRecipeYamlFile: 'qwen06b_full_sft_template.yaml',
+        lmfRecipeRunPath: '/s3/train-recipes/llama-factory-project/',
+        lmfRecipeYamlFile: 'yaml_template.yaml',
         mlflowTrackingUri: '',
         logMonitoringConfig: ''
       };
@@ -2699,6 +2699,26 @@ app.get('/api/s3-storage', async (req, res) => {
         }
         
         console.log(`Extracted from volumeHandle: bucket=${bucketName}, region=${region}`);
+      }
+      
+      // 检查 mountOptions 中的 region 信息
+      if (!region && pvData.spec && pvData.spec.mountOptions) {
+        const mountOptions = pvData.spec.mountOptions;
+        console.log('Checking mountOptions for region:', mountOptions);
+        
+        for (const option of mountOptions) {
+          if (typeof option === 'string' && option.startsWith('region ')) {
+            region = option.replace('region ', '').trim();
+            console.log(`Found region in mountOptions: ${region}`);
+            break;
+          }
+        }
+      }
+      
+      // 更新 bucketInfo 中的 region 信息
+      if (bucketInfo && region) {
+        bucketInfo.region = region;
+        console.log(`Updated bucketInfo with region: ${region}`);
       }
       
       // 如果还是没有找到，尝试从annotations中获取

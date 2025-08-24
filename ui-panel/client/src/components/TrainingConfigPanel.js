@@ -167,14 +167,14 @@ const TrainingConfigPanel = ({ onLaunch, deploymentStatus }) => {
         layout="vertical"
         onFinish={handleSubmit}
         initialValues={{
-          trainingJobName: 'hyperpodpytorchjob-1',
-          dockerImage: '633205212955.dkr.ecr.us-west-2.amazonaws.com/sm-training-op-torch26-smhp-op:latest',
-          instanceType: 'ml.g5.12xlarge',
+          trainingJobName: 'torchrecipe-1',
+          dockerImage: 'ACCOUNTID.dkr.ecr.REGION.amazonaws.com/REPONAME:latest',
+          instanceType: 'INSTANCE_TYPE',
           nprocPerNode: 1,
           replicas: 1,
           efaCount: 16,
-          lmfRecipeRunPath: '/s3/training_code/model-training-with-hyperpod-training-operator/llama-factory-project/',
-          lmfRecipeYamlFile: 'qwen06b_full_sft_template.yaml',
+          lmfRecipeRunPath: '/s3/train-recipes/llama-factory-project/',
+          lmfRecipeYamlFile: 'yaml_template.yaml',
           mlflowTrackingUri: '',
           logMonitoringConfig: ''
         }}
