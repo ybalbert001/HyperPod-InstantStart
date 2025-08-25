@@ -31,6 +31,8 @@ import {
   ClusterOutlined,
   PlusOutlined
 } from '@ant-design/icons';
+import globalRefreshManager from '../hooks/useGlobalRefresh';
+import operationRefreshManager from '../hooks/useOperationRefresh';
 
 const { Title, Text } = Typography;
 const { Step } = Steps;
@@ -260,6 +262,16 @@ const ClusterManagement = () => {
 
   useEffect(() => {
     console.log('ClusterManagement: Initial useEffect triggered');
+    
+    // 注册到全局刷新管理器
+    const componentId = 'cluster-management';
+    globalRefreshManager.subscribe(componentId, refreshAllStatus, {
+      priority: 10 // 最高优先级
+    });
+    
+    // 注册到操作刷新管理器
+    operationRefreshManager.subscribe(componentId, refreshAllStatus);
+    
     // 初始化多集群和表单默认值
     const initializeComponent = async () => {
       try {
@@ -286,6 +298,12 @@ const ClusterManagement = () => {
     };
     
     initializeComponent();
+    
+    // 清理函数
+    return () => {
+      globalRefreshManager.unsubscribe(componentId);
+      operationRefreshManager.unsubscribe(componentId);
+    };
   }, []); // 只在组件挂载时执行一次
 
   // 单独的 useEffect 处理 activeCluster 变化
@@ -378,9 +396,15 @@ const ClusterManagement = () => {
     }
   };
 
-  // 统一的全局刷新函数
-  const refreshAllStatus = async (showSuccessMessage = false) => {
-    setLoading(true);
+  // 统一的全局刷新函数 - 适配全局刷新管理器
+  const refreshAllStatus = async (showSuccessMessage = true) => {
+    // 如果是从全局刷新管理器调用，不显示loading状态（避免冲突）
+    const isGlobalRefresh = showSuccessMessage === undefined;
+    
+    if (!isGlobalRefresh) {
+      setLoading(true);
+    }
+    
     try {
       // 并行执行所有刷新操作
       await Promise.all([
@@ -390,13 +414,20 @@ const ClusterManagement = () => {
         fetchLogs('configure'),
         fetchMLFlowInfo() // 添加 MLFlow 信息获取
       ]);
-      if (showSuccessMessage) {
+      
+      if (showSuccessMessage && !isGlobalRefresh) {
         message.success('Status refreshed successfully');
       }
     } catch (error) {
-      message.error(`Error refreshing status: ${error.message}`);
+      console.error('Error refreshing status:', error);
+      if (!isGlobalRefresh) {
+        message.error(`Error refreshing status: ${error.message}`);
+      }
+      throw error; // 重新抛出错误，让全局刷新管理器处理
     } finally {
-      setTimeout(() => setLoading(false), 500); // 给用户一个加载反馈
+      if (!isGlobalRefresh) {
+        setTimeout(() => setLoading(false), 500); // 给用户一个加载反馈
+      }
     }
   };
 
@@ -453,16 +484,14 @@ const ClusterManagement = () => {
       const result = await response.json();
       
       if (result.success) {
-        message.success('Cluster launch started in background. Use "Refresh Status" to check progress.');
+        message.success('Cluster launch started in background. Use "Refresh All" to check progress.');
         
-        // 延长刷新时间到60秒，给 CloudFormation 堆栈创建足够的时间
-        setTimeout(async () => {
-          try {
-            await refreshAllStatus(false); // 完整刷新，包含状态检查
-          } catch (error) {
-            console.error('Error during post-launch refresh:', error);
-          }
-        }, 60000); // 60秒后刷新，给 CloudFormation 足够的启动时间
+        // 🚀 触发操作刷新 - 替代原有的setTimeout刷新
+        operationRefreshManager.triggerOperationRefresh('cluster-launch', {
+          clusterTag: form.getFieldValue('clusterTag') || activeCluster,
+          timestamp: new Date().toISOString()
+        });
+        
       } else {
         setStep1Status('error');
         message.error(`Cluster launch failed: ${result.error}`);
@@ -494,14 +523,12 @@ const ClusterManagement = () => {
       if (result.success) {
         message.success('Cluster configuration started in background');
         
-        // 5秒后进行完整状态刷新
-        setTimeout(async () => {
-          try {
-            await refreshAllStatus(false); // 完整刷新，包含状态检查
-          } catch (error) {
-            console.error('Error during post-configure refresh:', error);
-          }
-        }, 5000); // 5秒后刷新，给配置脚本启动时间
+        // 🚀 触发操作刷新 - 替代原有的setTimeout刷新
+        operationRefreshManager.triggerOperationRefresh('cluster-configure', {
+          clusterTag: form.getFieldValue('clusterTag') || activeCluster,
+          timestamp: new Date().toISOString()
+        });
+        
       } else {
         setStep2Status('error');
         message.error(`Cluster configuration failed: ${result.error}`);

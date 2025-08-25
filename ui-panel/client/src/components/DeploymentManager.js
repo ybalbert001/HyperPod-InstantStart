@@ -24,7 +24,8 @@ import {
   GlobalOutlined,
   LockOutlined
 } from '@ant-design/icons';
-import { useAutoRefresh } from '../hooks/useAutoRefresh';
+import globalRefreshManager from '../hooks/useGlobalRefresh';
+import operationRefreshManager from '../hooks/useOperationRefresh';
 
 const { Option } = Select;
 
@@ -33,33 +34,49 @@ const DeploymentManager = () => {
   const [loading, setLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState({});
 
-  const fetchDeployments = async () => {
-    setLoading(true);
+  const fetchDeployments = async (showMessage = true) => {
+    // 如果是从全局刷新管理器调用，不显示loading状态（避免冲突）
+    const isGlobalRefresh = showMessage === undefined;
+    
+    if (!isGlobalRefresh) {
+      setLoading(true);
+    }
+    
     try {
       const response = await fetch('/api/deployments');
       const data = await response.json();
       setDeployments(data);
     } catch (error) {
       console.error('Error fetching deployments:', error);
-      message.error('Failed to fetch deployments');
+      if (!isGlobalRefresh) {
+        message.error('Failed to fetch deployments');
+      }
+      throw error; // 重新抛出错误给全局刷新管理器处理
     } finally {
-      setLoading(false);
+      if (!isGlobalRefresh) {
+        setLoading(false);
+      }
     }
   };
 
-  // 使用自动刷新Hook
-  const { manualRefresh, config } = useAutoRefresh(
-    'deployment-manager',
-    fetchDeployments,
-    { 
-      enabled: true,
-      immediate: true
-    }
-  );
-
+  // 注册到全局刷新管理器，替代useAutoRefresh
   useEffect(() => {
-    // 组件挂载时已经通过useAutoRefresh自动调用了fetchDeployments
-    // 这里不需要再次调用
+    const componentId = 'deployment-manager';
+    
+    globalRefreshManager.subscribe(componentId, fetchDeployments, {
+      priority: 7 // 高优先级
+    });
+
+    // 注册到操作刷新管理器
+    operationRefreshManager.subscribe(componentId, fetchDeployments);
+
+    // 初始加载
+    fetchDeployments();
+
+    return () => {
+      globalRefreshManager.unsubscribe(componentId);
+      operationRefreshManager.unsubscribe(componentId);
+    };
   }, []);
 
   const handleUndeploy = async (modelTag) => {
@@ -80,10 +97,11 @@ const DeploymentManager = () => {
       const result = await response.json();
       
       if (result.success) {
-        // 移除重复的message.success，让WebSocket处理通知
-        // message.success(result.message);
-        // 刷新部署列表
-        fetchDeployments();
+        // 🚀 触发操作刷新 - 替代直接调用fetchDeployments
+        operationRefreshManager.triggerOperationRefresh('model-undeploy', {
+          modelTag,
+          timestamp: new Date().toISOString()
+        });
       } else {
         message.error(`Failed to undeploy: ${result.error}`);
       }
@@ -342,12 +360,12 @@ const DeploymentManager = () => {
       }
       extra={
         <Space>
-          <span style={{ fontSize: '12px', color: '#52c41a' }}>
-            Auto-refresh: {Math.floor(config.INTERVAL / 60000)}min
+          <span style={{ fontSize: '12px', color: '#1890ff' }}>
+            • Managed by Global Refresh
           </span>
           <Button 
             icon={<ReloadOutlined />} 
-            onClick={manualRefresh}
+            onClick={() => fetchDeployments(true)}
             loading={loading}
             size="small"
           >

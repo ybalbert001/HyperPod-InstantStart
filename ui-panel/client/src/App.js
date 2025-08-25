@@ -1,13 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Layout, Row, Col, Card, message, Tabs, Space, Badge, Button } from 'antd';
-import { ContainerOutlined, ApiOutlined, ReloadOutlined, RocketOutlined, ExperimentOutlined, DatabaseOutlined, CloudServerOutlined, SettingOutlined } from '@ant-design/icons';
+import { Layout, Row, Col, Card, message, Tabs, Space, Badge, Typography } from 'antd';
+import { ContainerOutlined, ApiOutlined, RocketOutlined, ExperimentOutlined, DatabaseOutlined, CloudServerOutlined, SettingOutlined } from '@ant-design/icons';
 import ThemeProvider from './components/ThemeProvider';
 import ConfigPanel from './components/ConfigPanel';
 import ClusterStatusV2 from './components/ClusterStatusV2';
 import TestPanel from './components/TestPanel';
 import StatusMonitor from './components/StatusMonitor';
 import DeploymentManager from './components/DeploymentManager';
-import TrainingConfigPanel from './components/TrainingConfigPanel';
 import HyperPodRecipes from './components/HyperPodRecipes';
 import TrainingMonitorPanel from './components/TrainingMonitorPanel';
 import TrainingHistoryPanel from './components/TrainingHistoryPanel';
@@ -15,13 +14,20 @@ import ModelDownloadPanel from './components/ModelDownloadPanel';
 import S3StoragePanel from './components/S3StoragePanel';
 import HyperPodJobManager from './components/HyperPodJobManager';
 import ClusterManagement from './components/ClusterManagement';
+import GlobalRefreshButton from './components/GlobalRefreshButton';
+import OperationFeedback from './components/OperationFeedback';
+import globalRefreshManager from './hooks/useGlobalRefresh';
+import operationRefreshManager from './hooks/useOperationRefresh';
 import { refreshManager } from './hooks/useAutoRefresh';
 import { getActiveTheme } from './config/themeConfig';
+import './utils/testOperationRefresh'; // 导入测试工具
+import './utils/refreshConfigViewer'; // 导入刷新配置查看工具
 import './App.css';
 import './styles/dynamic-theme.css';
 
 const { Header, Content } = Layout;
 const { TabPane } = Tabs;
+const { Text } = Typography;
 
 function App() {
   const [clusterData, setClusterData] = useState([]);
@@ -57,59 +63,90 @@ function App() {
     websocket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        console.log('WebSocket message received:', data.type);
+        console.log('📡 WebSocket message received:', data.type);
         
         switch (data.type) {
           case 'status_update':
-            console.log('Status update:', data.pods?.length, 'pods,', data.services?.length, 'services');
+            console.log('📊 Status update:', data.pods?.length, 'pods,', data.services?.length, 'services');
             setPods(data.pods || []);
             setServices(data.services || []);
             break;
+            
+          case 'request_status_update_broadcast':
+            // 🔄 服务器请求客户端更新状态
+            console.log('🔄 Server requested status update');
+            // 触发全局刷新，但不显示消息
+            globalRefreshManager.triggerGlobalRefresh({
+              source: 'websocket-broadcast',
+              silent: true
+            });
+            break;
+            
+          case 'pong':
+            // 心跳响应
+            console.log('❤️ WebSocket pong received');
+            break;
+            
           case 'deployment':
             setDeploymentStatus(data);
             if (data.status === 'success') {
               message.success(data.message);
+              // 🚀 触发操作刷新
+              operationRefreshManager.triggerOperationRefresh('model-deploy', data);
             } else {
               message.error(data.message);
             }
             break;
+            
           case 'training_launch':
             // 处理训练任务部署状态
             if (data.status === 'success') {
               message.success(data.message);
+              // 🚀 触发操作刷新
+              operationRefreshManager.triggerOperationRefresh('training-start', data);
             } else {
               message.error(data.message);
             }
             break;
+            
           case 'undeployment':
             if (data.status === 'success') {
               message.success(data.message);
+              // 🚀 触发操作刷新
+              operationRefreshManager.triggerOperationRefresh('model-undeploy', data);
             } else {
               message.error(data.message);
             }
             break;
+            
           case 'training_job_deleted':
             // 处理训练任务删除状态
             if (data.status === 'success') {
               message.success(data.message);
+              // 🚀 触发操作刷新 - 使用training-delete操作
+              operationRefreshManager.triggerOperationRefresh('training-delete', data);
             } else {
               message.error(data.message);
             }
             break;
+            
           case 'model_download':
             // 处理模型下载状态
             if (data.status === 'success') {
               message.success(data.message);
+              // 🚀 触发操作刷新
+              operationRefreshManager.triggerOperationRefresh('model-download', data);
             } else {
               message.error(data.message);
             }
             break;
+            
           default:
-            console.log('Unknown message type:', data.type);
+            console.log('❓ Unknown message type:', data.type);
             break;
         }
       } catch (error) {
-        console.error('Error parsing WebSocket message:', error);
+        console.error('❌ Error parsing WebSocket message:', error);
       }
     };
     
@@ -139,7 +176,72 @@ function App() {
     return websocket;
   };
 
+  // 🔄 通过WebSocket按需请求状态更新
+  const requestWebSocketStatusUpdate = () => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'request_status_update',
+        timestamp: new Date().toISOString()
+      }));
+      console.log('📡 Requested WebSocket status update');
+    }
+  };
+
+  // 💓 WebSocket心跳检测
   useEffect(() => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    
+    const pingInterval = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'ping',
+          timestamp: new Date().toISOString()
+        }));
+      }
+    }, 30000); // 每30秒发送一次心跳
+    
+    return () => clearInterval(pingInterval);
+  }, [ws]);
+
+  useEffect(() => {
+    // 注册App级别的刷新函数到全局刷新管理器
+    const appRefreshFunction = async () => {
+      // 🔄 优先通过WebSocket请求更新（更快）
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        requestWebSocketStatusUpdate();
+      }
+      
+      // 🔄 同时执行API调用作为备用
+      await Promise.all([
+        fetchClusterStatus(),
+        fetchPodsAndServices()
+      ]);
+    };
+
+    globalRefreshManager.subscribe('app-status', appRefreshFunction, {
+      priority: 9 // 高优先级，与cluster-status同级
+    });
+
+    // 🚀 注册到操作刷新管理器
+    operationRefreshManager.subscribe('app-status', appRefreshFunction);
+
+    // 🚀 注册pods和services刷新到全局刷新管理器
+    const podsServicesRefreshFunction = async () => {
+      try {
+        await fetchPodsAndServices();
+      } catch (error) {
+        console.error('Pods and services refresh error:', error);
+        throw error;
+      }
+    };
+
+    globalRefreshManager.subscribe('pods-services', podsServicesRefreshFunction, {
+      priority: 8 // 高优先级，与status-monitor相同
+    });
+
+    // 🚀 注册到操作刷新管理器
+    operationRefreshManager.subscribe('pods-services', podsServicesRefreshFunction);
+
     // 延迟连接WebSocket，给后端服务器启动时间
     const connectTimer = setTimeout(() => {
       connectWebSocket();
@@ -153,6 +255,10 @@ function App() {
     
     return () => {
       clearTimeout(connectTimer);
+      globalRefreshManager.unsubscribe('app-status');
+      globalRefreshManager.unsubscribe('pods-services');
+      operationRefreshManager.unsubscribe('app-status');
+      operationRefreshManager.unsubscribe('pods-services');
       if (ws) {
         ws.close(1000, 'Component unmounting'); // 正常关闭
       }
@@ -226,46 +332,10 @@ function App() {
     }
   };
 
-  // 新增：刷新所有App Status数据的函数
-  const refreshAllAppStatus = async () => {
-    setRefreshing(true);
-    try {
-      console.log('Refreshing all App Status data...');
-      
-      if (USE_V2_API) {
-        // 使用 V2 API 强制刷新
-        const response = await fetch('/api/v2/app-status?force=true');
-        const data = await response.json();
-        
-        console.log('Forced refresh V2 response:', {
-          pods: data.pods?.length || 0,
-          services: data.services?.length || 0,
-          fetchTime: data.fetchTime
-        });
-        
-        setPods(data.rawPods || data.pods || []);
-        setServices(data.rawServices || data.services || []);
-      } else {
-        // 直接刷新pods和services数据
-        await fetchPodsAndServices();
-      }
-      
-      // 同时使用全局刷新管理器触发其他组件刷新
-      refreshManager.triggerRefresh();
-      
-      message.success('All App Status data refreshed successfully');
-    } catch (error) {
-      console.error('Error refreshing all app status:', error);
-      message.error('Failed to refresh all app status data');
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
   const handleDeploy = async (config) => {
-    console.log('handleDeploy called with config:', config);
+    console.log('🚀 handleDeploy called with config:', config);
     try {
-      console.log('Deploying with config:', config);
+      console.log('🚀 Deploying with config:', config);
       const response = await fetch('/api/deploy', {
         method: 'POST',
         headers: {
@@ -274,22 +344,25 @@ function App() {
         body: JSON.stringify(config),
       });
       
-      console.log('Response received:', response);
+      console.log('📡 Response received:', response);
       const result = await response.json();
-      console.log('Response JSON:', result);
+      console.log('📊 Response JSON:', result);
       
       if (result.success) {
-        // 移除重复的message.success，让WebSocket处理通知
-        // message.success('Deployment initiated successfully');
-        // 刷新集群状态
-        fetchClusterStatus();
-        // 刷新pods和services
-        fetchPodsAndServices();
+        // 🚀 触发操作刷新 - 立即刷新相关组件
+        operationRefreshManager.triggerOperationRefresh('model-deploy', {
+          modelId: config.modelId,
+          deploymentType: config.deploymentType,
+          timestamp: new Date().toISOString(),
+          source: 'config-panel'
+        });
+        
+        console.log('✅ Model deployment initiated and refresh triggered');
       } else {
         message.error(`Deployment failed: ${result.error}`);
       }
     } catch (error) {
-      console.error('Error deploying:', error);
+      console.error('❌ Error deploying:', error);
       message.error('Failed to deploy model');
     }
   };
@@ -354,12 +427,33 @@ function App() {
               Unified Platform
             </span>
           </h1>
+          
           <div style={{ marginLeft: 'auto', color: 'white', fontSize: '12px' }}>
             Status: {getConnectionStatusDisplay()}
           </div>
         </Header>
       
       <Content className="app-content">
+        {/* 全局刷新控制区域 */}
+        <div style={{ 
+          marginBottom: '16px', 
+          padding: '12px 16px',
+          backgroundColor: '#fafafa',
+          border: '1px solid #d9d9d9',
+          borderRadius: '6px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center'
+        }}>
+          <div>
+            <Text strong style={{ marginRight: '16px' }}>Global Refresh Control</Text>
+            <Text type="secondary" style={{ fontSize: '12px' }}>
+              Use "Refresh All" to update all components, or enable auto-refresh for continuous updates
+            </Text>
+          </div>
+          <GlobalRefreshButton />
+        </div>
+        
         {/* 主标签切换区域 */}
         <div style={{ marginBottom: '16px' }}>
           <Tabs 
@@ -541,17 +635,9 @@ function App() {
                 size="small"
                 tabBarExtraContent={
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px' }}>
-                    <span style={{ fontSize: '11px', color: '#52c41a' }}>
-                      • Auto-refresh every {Math.floor(refreshManager.getConfig().INTERVAL / 60000)} min
+                    <span style={{ fontSize: '11px', color: '#1890ff' }}>
+                      • Managed by Global Refresh
                     </span>
-                    <Button 
-                      size="small"
-                      icon={<ReloadOutlined />}
-                      loading={refreshing}
-                      onClick={refreshAllAppStatus}
-                    >
-                      Refresh All
-                    </Button>
                   </div>
                 }
               >
@@ -630,6 +716,9 @@ function App() {
           </Col>
         </Row>
       </Content>
+      
+      {/* 操作反馈组件 */}
+      <OperationFeedback />
     </Layout>
     </ThemeProvider>
   );

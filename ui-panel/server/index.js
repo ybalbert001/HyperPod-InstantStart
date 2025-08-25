@@ -2484,11 +2484,11 @@ app.post('/api/test-model', async (req, res) => {
   }
 });
 
-// WebSocket连接处理
+// WebSocket连接处理 - 优化版本，减少日志污染
 wss.on('connection', (ws) => {
   console.log('WebSocket client connected');
   
-  // 立即发送一次状态更新
+  // 发送状态更新的函数
   const sendStatusUpdate = async () => {
     try {
       const [pods, services] = await Promise.all([
@@ -2499,56 +2499,196 @@ wss.on('connection', (ws) => {
       const statusData = {
         type: 'status_update',
         pods,
-        services
+        services,
+        timestamp: new Date().toISOString()
       };
       
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify(statusData));
-        console.log(`Sent status update: ${pods.length} pods, ${services.length} services`);
+        console.log(`📡 Status update sent: ${pods.length} pods, ${services.length} services`);
       }
     } catch (error) {
-      console.error('Error fetching status for WebSocket:', error);
+      console.error('❌ Error fetching status for WebSocket:', error);
     }
   };
   
-  // 立即发送一次
+  // 🚀 优化：只在连接时发送一次初始状态，不再定时发送
   sendStatusUpdate();
   
-  // 定期发送Pod和Service状态更新
-  const interval = setInterval(sendStatusUpdate, 60000); // 每60秒（1分钟）更新一次
+  // 存储WebSocket连接，用于按需广播
+  ws.isAlive = true;
+  ws.lastActivity = Date.now();
   
   // 处理WebSocket消息
   ws.on('message', (message) => {
     try {
       const data = JSON.parse(message);
-      console.log('Received WebSocket message:', data);
+      ws.lastActivity = Date.now();
       
-      if (data.type === 'start_log_stream') {
-        startLogStream(ws, data.jobName, data.podName);
-      } else if (data.type === 'stop_log_stream') {
-        stopLogStream(ws, data.jobName, data.podName);
-      } else if (data.type === 'stop_all_log_streams') {
-        stopAllLogStreams(ws);
+      // 🎯 按需处理不同类型的消息
+      switch (data.type) {
+        case 'request_status_update':
+          // 客户端主动请求状态更新
+          console.log('📡 Client requested status update');
+          sendStatusUpdate();
+          break;
+          
+        case 'start_log_stream':
+          console.log(`🔄 Starting log stream for ${data.jobName}/${data.podName}`);
+          startLogStream(ws, data.jobName, data.podName);
+          break;
+          
+        case 'stop_log_stream':
+          console.log(`⏹️ Stopping log stream for ${data.jobName}/${data.podName}`);
+          stopLogStream(ws, data.jobName, data.podName);
+          break;
+          
+        case 'stop_all_log_streams':
+          console.log('⏹️ Stopping all log streams');
+          stopAllLogStreams(ws);
+          break;
+          
+        case 'ping':
+          // 心跳检测
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'pong', timestamp: new Date().toISOString() }));
+          }
+          break;
+          
+        default:
+          console.log('📨 Received WebSocket message:', data.type);
       }
     } catch (error) {
-      console.error('Error parsing WebSocket message:', error);
+      console.error('❌ Error parsing WebSocket message:', error);
     }
   });
   
+  // 心跳检测
+  ws.on('pong', () => {
+    ws.isAlive = true;
+    ws.lastActivity = Date.now();
+  });
+  
   ws.on('close', () => {
-    console.log('WebSocket client disconnected');
-    clearInterval(interval);
+    console.log('🔌 WebSocket client disconnected');
     // 清理该连接的所有日志流
     stopAllLogStreams(ws);
   });
   
   ws.on('error', (error) => {
-    console.error('WebSocket error:', error);
-    clearInterval(interval);
+    console.error('❌ WebSocket error:', error);
     // 清理该连接的所有日志流
     stopAllLogStreams(ws);
   });
 });
+
+// 🚀 广播函数 - 向所有连接的客户端发送消息
+function broadcast(message) {
+  const messageStr = JSON.stringify({
+    ...message,
+    timestamp: new Date().toISOString()
+  });
+  
+  let sentCount = 0;
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(messageStr);
+      sentCount++;
+    }
+  });
+  
+  if (sentCount > 0) {
+    console.log(`📡 Broadcast sent to ${sentCount} clients:`, message.type);
+  }
+}
+
+// 🔄 按需状态更新广播
+function broadcastStatusUpdate() {
+  const message = {
+    type: 'request_status_update_broadcast',
+    source: 'server'
+  };
+  broadcast(message);
+}
+
+// ❤️ WebSocket心跳检测 - 每30秒检查一次连接状态
+const heartbeatInterval = setInterval(() => {
+  const now = Date.now();
+  let activeConnections = 0;
+  
+  wss.clients.forEach((ws) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      // 检查连接是否活跃（5分钟内有活动）
+      if (now - ws.lastActivity < 300000) {
+        ws.ping();
+        activeConnections++;
+      } else {
+        console.log('🔌 Terminating inactive WebSocket connection');
+        ws.terminate();
+      }
+    }
+  });
+  
+  // 只在有连接时输出心跳日志
+  if (activeConnections > 0) {
+    console.log(`❤️ WebSocket heartbeat: ${activeConnections} active connections`);
+  }
+}, 30000);
+
+// 🧹 进程清理函数 - 优化版本
+process.on('SIGTERM', () => {
+  console.log('🛑 Received SIGTERM signal - Server shutting down gracefully...');
+  gracefulShutdown('SIGTERM');
+});
+
+process.on('SIGINT', () => {
+  console.log('🛑 Received SIGINT signal (Ctrl+C) - Server shutting down gracefully...');
+  gracefulShutdown('SIGINT');
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('❌ Uncaught Exception:', error);
+  console.error('Stack trace:', error.stack);
+  gracefulShutdown('uncaughtException');
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+  gracefulShutdown('unhandledRejection');
+});
+
+// 优雅关闭函数
+function gracefulShutdown(signal) {
+  console.log(`🔄 Starting graceful shutdown (signal: ${signal})...`);
+  
+  // 清理WebSocket心跳检测
+  if (typeof heartbeatInterval !== 'undefined') {
+    clearInterval(heartbeatInterval);
+    console.log('✅ WebSocket heartbeat interval cleared');
+  }
+  
+  // 关闭WebSocket服务器
+  if (wss) {
+    console.log(`📡 Closing WebSocket server (${wss.clients.size} active connections)...`);
+    wss.close(() => {
+      console.log('✅ WebSocket server closed');
+    });
+  }
+  
+  // 清理活跃的日志流
+  if (activeLogStreams && activeLogStreams.size > 0) {
+    console.log(`🧹 Cleaning up ${activeLogStreams.size} active log streams...`);
+    activeLogStreams.clear();
+    console.log('✅ Log streams cleaned up');
+  }
+  
+  console.log('✅ Graceful shutdown completed');
+  
+  // 给一些时间让清理完成，然后退出
+  setTimeout(() => {
+    process.exit(signal === 'uncaughtException' || signal === 'unhandledRejection' ? 1 : 0);
+  }, 1000);
+}
 
 // 启动pod日志流
 function startLogStream(ws, jobName, podName) {
@@ -3593,7 +3733,16 @@ app.get('/api/cluster/cloudformation-status', (req, res) => multiClusterStatus.h
 console.log('Multi-cluster management APIs loaded');
 
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`WebSocket server running on port ${WS_PORT}`);
-  console.log('Multi-cluster management enabled');
+  console.log('🚀 ========================================');
+  console.log('🚀 HyperPod InstantStart Server Started');
+  console.log('🚀 ========================================');
+  console.log(`📡 HTTP Server: http://localhost:${PORT}`);
+  console.log(`🔌 WebSocket Server: ws://localhost:${WS_PORT}`);
+  console.log(`🌐 Multi-cluster management: enabled`);
+  console.log(`⏰ Server started at: ${new Date().toISOString()}`);
+  console.log(`🖥️  Node.js version: ${process.version}`);
+  console.log(`💾 Memory usage: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`);
+  console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log('🚀 ========================================');
+  console.log('✅ Server is ready to accept connections');
 });

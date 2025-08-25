@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Form, Input, Button, Card, Space, Collapse, message, Typography } from 'antd';
 import { DownloadOutlined, KeyOutlined, RobotOutlined } from '@ant-design/icons';
+import operationRefreshManager from '../hooks/useOperationRefresh';
 
 const { Panel } = Collapse;
 const { Text } = Typography;
@@ -13,7 +14,7 @@ const ModelDownloadPanel = () => {
   const handleDownload = async (values) => {
     try {
       setLoading(true);
-      console.log('Starting model download with values:', values);
+      console.log('🚀 Starting model download with values:', values);
       
       const response = await fetch('/api/download-model', {
         method: 'POST',
@@ -29,14 +30,20 @@ const ModelDownloadPanel = () => {
       const result = await response.json();
       
       if (result.success) {
-        // 移除重复的message.success，让WebSocket处理通知
-        // message.success('Model download initiated successfully');
+        // 🚀 触发操作刷新 - 立即刷新相关组件
+        operationRefreshManager.triggerOperationRefresh('model-download', {
+          modelId: values.modelId,
+          timestamp: new Date().toISOString(),
+          source: 'model-download-panel'
+        });
+        
+        console.log('✅ Model download initiated and refresh triggered');
         form.resetFields();
       } else {
         message.error(`Download failed: ${result.error}`);
       }
     } catch (error) {
-      console.error('Error downloading model:', error);
+      console.error('❌ Error downloading model:', error);
       message.error('Failed to initiate model download');
     } finally {
       setLoading(false);

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Table, 
   Progress, 
@@ -21,9 +21,29 @@ import {
   ClusterOutlined,
   WarningOutlined
 } from '@ant-design/icons';
+import globalRefreshManager from '../hooks/useGlobalRefresh';
 
 const ClusterStatusV2 = ({ clusterData = [], onRefresh }) => {
   const [loading, setLoading] = useState(false);
+
+  // 注册到全局刷新管理器
+  useEffect(() => {
+    const componentId = 'cluster-status';
+    
+    const refreshFunction = async () => {
+      if (onRefresh) {
+        await onRefresh();
+      }
+    };
+
+    globalRefreshManager.subscribe(componentId, refreshFunction, {
+      priority: 9 // 高优先级，与app-status相同
+    });
+
+    return () => {
+      globalRefreshManager.unsubscribe(componentId);
+    };
+  }, [onRefresh]);
 
   // 计算集群统计信息
   const calculateStats = (nodes) => {
@@ -48,22 +68,37 @@ const ClusterStatusV2 = ({ clusterData = [], onRefresh }) => {
 
   const stats = calculateStats(clusterData);
 
-  // 手动刷新
-  const handleRefresh = async () => {
+  // 手动刷新 - 适配全局刷新管理器
+  const handleRefresh = async (showMessage = true) => {
     if (!onRefresh) {
-      message.error('Refresh function not available');
+      if (showMessage) {
+        message.error('Refresh function not available');
+      }
       return;
     }
     
-    setLoading(true);
+    // 如果是从全局刷新管理器调用，不显示loading状态（避免冲突）
+    const isGlobalRefresh = showMessage === undefined;
+    
+    if (!isGlobalRefresh) {
+      setLoading(true);
+    }
+    
     try {
       await onRefresh();
-      message.success('Cluster status refreshed');
+      if (showMessage && !isGlobalRefresh) {
+        message.success('Cluster status refreshed');
+      }
     } catch (error) {
       console.error('Error refreshing cluster status:', error);
-      message.error('Failed to refresh cluster status');
+      if (!isGlobalRefresh) {
+        message.error('Failed to refresh cluster status');
+      }
+      throw error; // 重新抛出错误，让全局刷新管理器处理
     } finally {
-      setLoading(false);
+      if (!isGlobalRefresh) {
+        setLoading(false);
+      }
     }
   };
 

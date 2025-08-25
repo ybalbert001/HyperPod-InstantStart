@@ -27,6 +27,8 @@ import {
   EyeOutlined,
   InfoCircleOutlined
 } from '@ant-design/icons';
+import globalRefreshManager from '../hooks/useGlobalRefresh';
+import operationRefreshManager from '../hooks/useOperationRefresh';
 
 const { Option } = Select;
 const { Text, Title } = Typography;
@@ -248,9 +250,15 @@ const TrainingMonitorPanel = () => {
     console.log(`Log stream stopped for pod: ${podName}`);
   };
 
-  // 获取训练任务列表
-  const fetchTrainingJobs = async () => {
-    setLoading(true);
+  // 获取训练任务列表 - 适配全局刷新管理器
+  const fetchTrainingJobs = async (showMessage = true) => {
+    // 如果是从全局刷新管理器调用，不显示loading状态（避免冲突）
+    const isGlobalRefresh = showMessage === undefined;
+    
+    if (!isGlobalRefresh) {
+      setLoading(true);
+    }
+    
     try {
       const response = await fetch('/api/training-jobs');
       const result = await response.json();
@@ -267,11 +275,15 @@ const TrainingMonitorPanel = () => {
             setJobPods([]);
             setLogs({});
             setLogStreaming({});
-            message.info(`Training job "${selectedJob}" no longer exists and has been deselected.`);
+            if (showMessage && !isGlobalRefresh) {
+              message.info(`Training job "${selectedJob}" no longer exists and has been deselected.`);
+            }
           }
         }
       } else {
-        message.error(`Failed to fetch training jobs: ${result.error}`);
+        if (!isGlobalRefresh) {
+          message.error(`Failed to fetch training jobs: ${result.error}`);
+        }
         setTrainingJobs([]);
         // 清除选择状态
         if (selectedJob) {
@@ -280,10 +292,13 @@ const TrainingMonitorPanel = () => {
           setLogs({});
           setLogStreaming({});
         }
+        throw new Error(result.error); // 重新抛出错误给全局刷新管理器
       }
     } catch (error) {
       console.error('Error fetching training jobs:', error);
-      message.error('Failed to fetch training jobs');
+      if (!isGlobalRefresh) {
+        message.error('Failed to fetch training jobs');
+      }
       setTrainingJobs([]);
       // 清除选择状态
       if (selectedJob) {
@@ -292,8 +307,11 @@ const TrainingMonitorPanel = () => {
         setLogs({});
         setLogStreaming({});
       }
+      throw error; // 重新抛出错误给全局刷新管理器
     } finally {
-      setLoading(false);
+      if (!isGlobalRefresh) {
+        setLoading(false);
+      }
     }
   };
 
@@ -465,10 +483,35 @@ const TrainingMonitorPanel = () => {
     }
   };
 
-  // 初始加载
+  // 初始加载和全局刷新管理器注册
   useEffect(() => {
+    // 注册到全局刷新管理器
+    const componentId = 'training-monitor';
+    
+    const refreshFunction = async () => {
+      await fetchTrainingJobs();
+      // 如果有选中的job，也刷新其pods信息
+      if (selectedJob) {
+        await fetchJobPods(selectedJob);
+      }
+    };
+
+    globalRefreshManager.subscribe(componentId, refreshFunction, {
+      priority: 8 // 高优先级
+    });
+
+    // 注册到操作刷新管理器
+    operationRefreshManager.subscribe(componentId, refreshFunction);
+
+    // 初始加载
     fetchTrainingJobs();
-  }, []);
+
+    // 清理函数
+    return () => {
+      globalRefreshManager.unsubscribe(componentId);
+      operationRefreshManager.unsubscribe(componentId);
+    };
+  }, [selectedJob]); // 依赖selectedJob，当选中的job变化时重新注册
 
   // 渲染日志内容
   const renderLogs = () => {
@@ -584,14 +627,19 @@ const TrainingMonitorPanel = () => {
           </Space>
         }
         extra={
-          <Button
-            icon={<ReloadOutlined />}
-            onClick={fetchTrainingJobs}
-            loading={loading}
-            size="small"
-          >
-            Refresh
-          </Button>
+          <Space>
+            <span style={{ fontSize: '11px', color: '#1890ff' }}>
+              • Managed by Global Refresh
+            </span>
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => fetchTrainingJobs(true)}
+              loading={loading}
+              size="small"
+            >
+              Refresh
+            </Button>
+          </Space>
         }
         style={{ marginBottom: '16px' }}
       >

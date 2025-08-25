@@ -17,6 +17,7 @@ import {
   Form,
   Input
 } from 'antd';
+import operationRefreshManager from '../hooks/useOperationRefresh';
 import { 
   ReloadOutlined,
   InfoCircleOutlined,
@@ -82,6 +83,24 @@ const TrainingHistoryPanel = () => {
   useEffect(() => {
     fetchMlflowConfig();
     fetchTrainingHistory();
+
+    // 🚀 注册到操作刷新管理器
+    const componentId = 'training-history';
+    
+    const refreshFunction = async () => {
+      try {
+        await fetchTrainingHistory();
+      } catch (error) {
+        console.error('Training history refresh error:', error);
+        throw error;
+      }
+    };
+
+    operationRefreshManager.subscribe(componentId, refreshFunction);
+
+    return () => {
+      operationRefreshManager.unsubscribe(componentId);
+    };
   }, []); // 空依赖数组，只在组件挂载时执行一次
 
   // 获取MLflow配置
