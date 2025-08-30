@@ -95,10 +95,10 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
     vllmForm.setFieldsValue({ vllmCommand: newCommand });
   };
 
-  // 校验VLLM/SGLang命令格式
+  // 校验Container Entry命令格式
   const validateVllmCommand = (_, value) => {
     if (!value) {
-      return Promise.reject(new Error('Please input VLLM/SGLang command!'));
+      return Promise.reject(new Error('Please input entry command!'));
     }
 
     // 只检查命令是否为空，不限制命令格式
@@ -303,8 +303,8 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
         label={
           <Space>
             <CodeOutlined />
-            VLLM/SGLang Command
-            <Tooltip title="Any command to run the model server. The system will attempt to extract model information from this command automatically.">
+            EntryPoint Command
+            <Tooltip title="任意EntryPoint及参数，如python3 -m project.main --model HuggingfaceID">
               <InfoCircleOutlined />
             </Tooltip>
           </Space>
@@ -321,14 +321,13 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
 
       <div style={{ marginBottom: 16, padding: 12, backgroundColor: '#f0f9ff', borderRadius: 6 }}>
         <div style={{ fontSize: '12px', color: '#0369a1', marginBottom: 8 }}>
-          <strong>VLLM/SGLang 部署说明：</strong>
+          <strong>容器部署说明：</strong>
         </div>
         <div style={{ fontSize: '11px', color: '#0c4a6e' }}>
-          • 支持任意格式的启动命令，包括自定义脚本<br/>
-          • 系统会尝试从命令中提取模型信息<br/>
-          • 支持VLLM、SGLang及其他推理引擎<br/>
-          • 确保命令在容器环境中可执行<br/>
-          • 部署名称将基于提取的模型ID或随机生成
+          • 支持任意EntryPoint及参数，如python3 -m project.main --model HuggingfaceID<br/>
+          • 系统会尝试从命令中提取模型信息，部署名称将基于提取的模型ID<br/>
+          • 支持vLLM、SGLang及任意自定义容器<br/>
+          • 确保命令在容器环境中可执行
         </div>
       </div>
 
@@ -525,7 +524,7 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
           tab={
             <Space>
               <RocketOutlined />
-              VLLM/SGLang
+              Container
             </Space>
           } 
           key="vllm"
