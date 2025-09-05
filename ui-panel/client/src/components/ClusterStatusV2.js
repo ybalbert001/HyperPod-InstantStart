@@ -25,6 +25,19 @@ import globalRefreshManager from '../hooks/useGlobalRefresh';
 
 const ClusterStatusV2 = ({ clusterData = [], onRefresh }) => {
   const [loading, setLoading] = useState(false);
+  const [pendingGPUs, setPendingGPUs] = useState(0);
+
+  // 获取Pending GPU统计
+  const fetchPendingGPUs = async () => {
+    try {
+      const response = await fetch('/api/pending-gpus');
+      const data = await response.json();
+      setPendingGPUs(data.pendingGPUs || 0);
+    } catch (error) {
+      console.error('Error fetching pending GPUs:', error);
+      setPendingGPUs(0);
+    }
+  };
 
   // 注册到全局刷新管理器
   useEffect(() => {
@@ -32,13 +45,19 @@ const ClusterStatusV2 = ({ clusterData = [], onRefresh }) => {
     
     const refreshFunction = async () => {
       if (onRefresh) {
-        await onRefresh();
+        await Promise.all([
+          onRefresh(),
+          fetchPendingGPUs()
+        ]);
       }
     };
 
     globalRefreshManager.subscribe(componentId, refreshFunction, {
       priority: 9 // 高优先级，与app-status相同
     });
+
+    // 初始化时获取Pending GPU统计
+    fetchPendingGPUs();
 
     return () => {
       globalRefreshManager.unsubscribe(componentId);
@@ -47,14 +66,13 @@ const ClusterStatusV2 = ({ clusterData = [], onRefresh }) => {
 
   // 计算集群统计信息
   const calculateStats = (nodes) => {
-    return nodes.reduce((stats, node) => ({
+    const nodeStats = nodes.reduce((stats, node) => ({
       totalNodes: stats.totalNodes + 1,
       readyNodes: stats.readyNodes + (node.nodeReady ? 1 : 0),
       totalGPUs: stats.totalGPUs + node.totalGPU,
       usedGPUs: stats.usedGPUs + node.usedGPU,
       availableGPUs: stats.availableGPUs + node.availableGPU,
       allocatableGPUs: stats.allocatableGPUs + node.allocatableGPU,
-      pendingGPUs: stats.pendingGPUs + (node.pendingGPU || 0),
       errorNodes: stats.errorNodes + (node.error ? 1 : 0)
     }), {
       totalNodes: 0,
@@ -63,9 +81,14 @@ const ClusterStatusV2 = ({ clusterData = [], onRefresh }) => {
       usedGPUs: 0,
       availableGPUs: 0,
       allocatableGPUs: 0,
-      pendingGPUs: 0,
       errorNodes: 0
     });
+
+    // 使用单独获取的pendingGPUs
+    return {
+      ...nodeStats,
+      pendingGPUs
+    };
   };
 
   const stats = calculateStats(clusterData);
@@ -87,7 +110,12 @@ const ClusterStatusV2 = ({ clusterData = [], onRefresh }) => {
     }
     
     try {
-      await onRefresh();
+      // 同时刷新集群状态和Pending GPU统计
+      await Promise.all([
+        onRefresh(),
+        fetchPendingGPUs()
+      ]);
+      
       if (showMessage && !isGlobalRefresh) {
         message.success('Cluster status refreshed');
       }

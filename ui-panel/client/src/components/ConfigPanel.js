@@ -28,7 +28,8 @@ import {
   LinkOutlined,
   GlobalOutlined,
   LockOutlined,
-  DockerOutlined
+  DockerOutlined,
+  TagOutlined
 } from '@ant-design/icons';
 
 const { TextArea } = Input;
@@ -142,15 +143,6 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
       };
       
       console.log('deploymentConfig:', deploymentConfig);
-      
-      // 如果是VLLM部署，从命令中提取模型ID
-      if (activeTab === 'vllm' && values.vllmCommand) {
-        const modelId = extractModelIdFromVllmCommand(values.vllmCommand);
-        if (modelId) {
-          deploymentConfig.modelId = modelId;
-        }
-      }
-      
       console.log('Calling onDeploy with config:', deploymentConfig);
       await onDeploy(deploymentConfig);
       console.log('onDeploy completed successfully');
@@ -160,52 +152,6 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
       setLoading(false);
     }
   };
-
-  // 从VLLM命令中提取模型ID
-  const extractModelIdFromVllmCommand = (command) => {
-    try {
-      // 清理命令字符串
-      const cleanCommand = command
-        .replace(/\\\s*\n/g, ' ')  // 处理反斜杠换行
-        .replace(/\s+/g, ' ')      // 合并多个空格
-        .trim();
-      
-      // 分割为数组
-      const parts = cleanCommand.split(' ').filter(part => part.trim());
-      
-      // 1. 优先检查新的 vllm serve 格式
-      // 格式: vllm serve /path/to/model [其他参数]
-      const vllmServeIndex = parts.findIndex(part => part === 'serve');
-      if (vllmServeIndex !== -1 && vllmServeIndex + 1 < parts.length) {
-        // 检查前一个参数是否是 vllm 相关
-        if (vllmServeIndex > 0 && parts[vllmServeIndex - 1].includes('vllm')) {
-          const modelPath = parts[vllmServeIndex + 1];
-          // 确保不是以 -- 开头的参数
-          if (!modelPath.startsWith('--')) {
-            return modelPath;
-          }
-        }
-      }
-      
-      // 2. 检查传统的 --model 参数
-      const modelIndex = parts.findIndex(part => part === '--model');
-      if (modelIndex !== -1 && modelIndex + 1 < parts.length) {
-        return parts[modelIndex + 1];
-      }
-      
-      // 3. 检查 --model-path 参数 (SGLang)
-      const modelPathIndex = parts.findIndex(part => part === '--model-path');
-      if (modelPathIndex !== -1 && modelPathIndex + 1 < parts.length) {
-        return parts[modelPathIndex + 1];
-      }
-      
-      return null;
-    } catch (error) {
-      console.error('Error extracting model ID from VLLM command:', error);
-      return null;
-    }
-  };
-
 
   const getStatusAlert = () => {
     if (!deploymentStatus) return null;
@@ -250,7 +196,9 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
       onFinish={handleSubmit}
       initialValues={{
         replicas: 1,
-        isExternal: true
+        isExternal: true,
+        deploymentName: '',
+        dockerImage: 'vllm/vllm-openai:latest'
       }}
     >
       <Form.Item
@@ -273,6 +221,28 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
           max={10} 
           style={{ width: '100%' }}
           placeholder="Number of replicas"
+        />
+      </Form.Item>
+
+      <Form.Item
+        label={
+          <Space>
+            <TagOutlined />
+            Deployment Name
+            <Tooltip title="用于Kubernetes资源命名的标识符">
+              <InfoCircleOutlined />
+            </Tooltip>
+          </Space>
+        }
+        name="deploymentName"
+        rules={[
+          { required: true, message: 'Please input deployment name!' },
+          { pattern: /^[a-z0-9-]+$/, message: 'Only lowercase letters, numbers and hyphens allowed' }
+        ]}
+      >
+        <Input 
+          placeholder="e.g., qwen3-chat, llama2-7b"
+          style={{ fontFamily: 'monospace' }}
         />
       </Form.Item>
 

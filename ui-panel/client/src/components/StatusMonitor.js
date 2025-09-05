@@ -13,6 +13,7 @@ import {
   CheckCircleOutlined, 
   ExclamationCircleOutlined, 
   ClockCircleOutlined,
+  LoadingOutlined,
   ReloadOutlined,
   ApiOutlined,
   ContainerOutlined
@@ -96,6 +97,17 @@ const StatusMonitor = ({ pods, services, onRefresh, activeTab }) => {
   const getPodStatus = (pod) => {
     const phase = pod.status?.phase;
     const conditions = pod.status?.conditions || [];
+    const containerStatuses = pod.status?.containerStatuses || [];
+    
+    // 检查容器状态，优先显示容器的实际状态
+    for (const containerStatus of containerStatuses) {
+      if (containerStatus.state?.waiting) {
+        return containerStatus.state.waiting.reason?.toLowerCase() || 'waiting';
+      }
+      if (containerStatus.state?.terminated) {
+        return containerStatus.state.terminated.reason?.toLowerCase() || 'terminated';
+      }
+    }
     
     if (phase === 'Running') {
       const readyCondition = conditions.find(c => c.type === 'Ready');
@@ -108,20 +120,32 @@ const StatusMonitor = ({ pods, services, onRefresh, activeTab }) => {
   const getPodStatusColor = (status) => {
     switch (status) {
       case 'running': return 'success';
-      case 'pending': return 'processing';
+      case 'succeeded': return 'success';
+      case 'completed': return 'success';
       case 'failed': return 'error';
+      case 'error': return 'error';
+      case 'imagepullbackoff': return 'error';
+      case 'errimagepull': return 'error';
+      case 'crashloopbackoff': return 'error';
       case 'not-ready': return 'warning';
-      default: return 'default';
+      case 'terminating': return 'warning';
+      default: return 'processing'; // 其他状态默认为处理中
     }
   };
 
   const getPodStatusIcon = (status) => {
     switch (status) {
       case 'running': return <CheckCircleOutlined />;
-      case 'pending': return <ClockCircleOutlined />;
+      case 'succeeded': return <CheckCircleOutlined />;
+      case 'completed': return <CheckCircleOutlined />;
       case 'failed': return <ExclamationCircleOutlined />;
+      case 'error': return <ExclamationCircleOutlined />;
+      case 'imagepullbackoff': return <ExclamationCircleOutlined />;
+      case 'errimagepull': return <ExclamationCircleOutlined />;
+      case 'crashloopbackoff': return <ExclamationCircleOutlined />;
       case 'not-ready': return <ExclamationCircleOutlined />;
-      default: return <ClockCircleOutlined />;
+      case 'terminating': return <LoadingOutlined />;
+      default: return <LoadingOutlined />; // 其他状态默认为加载图标
     }
   };
 

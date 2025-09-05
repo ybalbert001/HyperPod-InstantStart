@@ -114,116 +114,14 @@ function executeKubectl(command, timeout = 30000) { // 默认30秒超时
   });
 }
 
-// 生成模型标签的函数
+// 简化的模型标签生成函数（用于模型下载）
 function generateModelTag(modelId) {
-  if (!modelId) return '';
-  // 替换特殊字符，只保留字母数字和连字符
+  if (!modelId) return 'model';
   return modelId
     .toLowerCase()
     .replace(/[^a-z0-9-]/g, '-')
     .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
-}
-
-// 编码模型ID为Kubernetes标签兼容格式
-function encodeModelIdForLabel(modelId) {
-  if (!modelId) return '';
-  
-  // 对于常见的模型ID格式，使用简化的编码方式
-  // 例如: Qwen/Qwen3-0.6B -> qwen3-06b
-  //      microsoft/DialoGPT-medium -> microsoft-dialogpt-medium
-  
-  return modelId
-    .toLowerCase()                    // 转为小写
-    .replace(/\//g, '-')             // 斜杠替换为连字符
-    .replace(/\./g, '')              // 移除点号
-    .replace(/[^a-z0-9-]/g, '-')     // 其他特殊字符替换为连字符
-    .replace(/-+/g, '-')             // 合并多个连字符
-    .replace(/^-|-$/g, '');          // 移除首尾连字符
-}
-
-// 解码Kubernetes标签为原始模型ID
-// 注意：由于使用了简化编码，这个函数主要用于向后兼容
-// 新的编码方式是不可逆的，实际的模型ID应该从其他地方获取
-function decodeModelIdFromLabel(encodedModelId) {
-  if (!encodedModelId) return '';
-  
-  // 尝试处理旧的编码格式（向后兼容）
-  if (encodedModelId.includes('--slash--')) {
-    return encodedModelId
-      .replace(/--slash--/g, '/')
-      .replace(/--colon--/g, ':')
-      .replace(/--dot--/g, '.')
-      .replace(/--at--/g, '@')
-      .replace(/--plus--/g, '+')
-      .replace(/--equals--/g, '=')
-      .replace(/--space--/g, ' ');
-  }
-  
-  // 对于新的简化编码，直接返回（因为是不可逆的）
-  return encodedModelId;
-}
-
-// 从VLLM/SGLang命令中提取模型ID
-function extractModelIdFromVllmCommand(vllmCommandString) {
-  if (!vllmCommandString) return '';
-  
-  // 清理命令字符串
-  const cleanCommand = vllmCommandString
-    .replace(/\\\s*\n/g, ' ')  // 处理反斜杠换行
-    .replace(/\s+/g, ' ')      // 合并多个空格
-    .trim();
-  
-  // 分割成参数数组
-  const args = cleanCommand.split(/\s+/);
-  
-  // 1. 优先检查新的 vllm serve 格式
-  // 格式: vllm serve /path/to/model [其他参数]
-  const vllmServeIndex = args.findIndex(arg => arg === 'serve');
-  if (vllmServeIndex !== -1 && vllmServeIndex + 1 < args.length) {
-    // 检查前一个参数是否是 vllm 相关
-    if (vllmServeIndex > 0 && args[vllmServeIndex - 1].includes('vllm')) {
-      const modelPath = args[vllmServeIndex + 1];
-      // 确保不是以 -- 开头的参数
-      if (!modelPath.startsWith('--')) {
-        return modelPath;
-      }
-    }
-  }
-  
-  // 2. 检查传统的 --model 参数 (VLLM)
-  const modelIndex = args.findIndex(arg => arg === '--model');
-  if (modelIndex !== -1 && modelIndex + 1 < args.length) {
-    return args[modelIndex + 1];
-  }
-  
-  // 3. 检查 --model-path 参数 (SGLang)
-  const modelPathIndex = args.findIndex(arg => arg === '--model-path');
-  if (modelPathIndex !== -1 && modelPathIndex + 1 < args.length) {
-    return args[modelPathIndex + 1];
-  }
-  
-  // 4. 对于其他自定义命令，尝试查找可能的模型路径
-  // 查找看起来像模型路径的参数（包含斜杠或常见模型名称模式）
-  for (let i = 1; i < args.length; i++) {
-    const arg = args[i];
-    // 跳过以 -- 开头的参数和它们的值
-    if (arg.startsWith('--')) {
-      i++; // 跳过参数值
-      continue;
-    }
-    
-    // 检查是否看起来像模型路径
-    if (arg.includes('/') || 
-        arg.match(/^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+$/) || // 格式如 "org/model"
-        arg.match(/^\/[a-zA-Z0-9_\/.-]+$/) ||              // 绝对路径
-        arg.match(/^[a-zA-Z0-9_.-]+$/) && arg.length > 3   // 简单模型名
-    ) {
-      return arg;
-    }
-  }
-  
-  return '';
+    .replace(/^-|-$/g, '') || 'model';
 }
 
 // 生成NLB注解的函数
@@ -444,6 +342,32 @@ function makeHttpRequest(url, payload, method = 'POST') {
   });
 }
 
+// 获取Pending GPU统计
+app.get('/api/pending-gpus', async (req, res) => {
+  try {
+    const pendingPodsOutput = await executeKubectl('get pods --field-selector status.phase=Pending -o json');
+    const pendingPodsData = JSON.parse(pendingPodsOutput);
+    
+    let pendingGPUs = 0;
+    if (pendingPodsData.items && Array.isArray(pendingPodsData.items)) {
+      pendingGPUs = pendingPodsData.items.reduce((sum, pod) => {
+        if (pod.spec?.containers) {
+          return sum + pod.spec.containers.reduce((containerSum, container) => {
+            const gpuRequest = container.resources?.requests?.['nvidia.com/gpu'];
+            return containerSum + (parseInt(gpuRequest) || 0);
+          }, 0);
+        }
+        return sum;
+      }, 0);
+    }
+    
+    res.json({ pendingGPUs });
+  } catch (error) {
+    console.error('Error fetching pending GPUs:', error);
+    res.status(500).json({ error: error.message, pendingGPUs: 0 });
+  }
+});
+
 // 获取集群节点GPU使用情况 - V2优化版本
 app.get('/api/cluster-status', handleClusterStatusV2);
 
@@ -535,61 +459,62 @@ app.post('/api/deploy', async (req, res) => {
       vllmCommand,
       ollamaModelId,
       gpuCount,
-      isExternal = true,  // 默认为external
-      modelId,  // 添加modelId参数，用于VLLM部署
-      dockerImage = 'vllm/vllm-openai:latest'  // 添加dockerImage参数，默认值
+      isExternal = true,
+      deploymentName,  // 用户输入的部署名称
+      dockerImage = 'vllm/vllm-openai:latest'
     } = req.body;
 
     console.log('Inference deployment request:', { 
       deploymentType, 
+      deploymentName,
       ollamaModelId, 
       replicas, 
       isExternal,
       dockerImage
     });
 
-    let templatePath, newYamlContent, finalModelTag;
+    // 生成带时间戳的唯一标签（符合Kubernetes命名规范）
+    const timestamp = new Date().toISOString()
+      .replace(/[:.]/g, '-')     // 替换冒号和点号为连字符
+      .replace('T', '-')         // 替换T为连字符
+      .slice(0, 19);             // 截取到秒级
+    const finalDeploymentTag = deploymentName ? `${deploymentName}-${timestamp}` : `model-${timestamp}`;
+    
+    console.log(`Generated deployment tag: "${finalDeploymentTag}"`);
+
+    let templatePath, newYamlContent;
 
     // 生成NLB注解
     const nlbAnnotations = generateNLBAnnotations(isExternal);
     console.log(`Generated NLB annotations (external: ${isExternal}):`, nlbAnnotations);
 
     if (deploymentType === 'ollama') {
-      // 处理Ollama部署 - 使用模型ID生成标签
-      finalModelTag = generateModelTag(ollamaModelId);
-      console.log(`Generated model tag from "${ollamaModelId}": "${finalModelTag}"`);
-      
+      // 处理Ollama部署
       templatePath = path.join(__dirname, '../templates/ollama-template.yaml');
       const templateContent = await fs.readFile(templatePath, 'utf8');
       
-      // 替换模板中的占位符 - 注意顺序：先替换更具体的占位符
+      // 替换模板中的占位符
       newYamlContent = templateContent
-        .replace(/ENCODED_MODEL_ID/g, encodeModelIdForLabel(ollamaModelId)) // 先替换ENCODED_MODEL_ID
-        .replace(/MODEL_TAG/g, finalModelTag)
+        .replace(/MODEL_TAG/g, finalDeploymentTag)
         .replace(/OLLAMA_MODEL_ID/g, ollamaModelId)
         .replace(/REPLICAS_COUNT/g, replicas.toString())
         .replace(/GPU_COUNT/g, gpuCount.toString())
         .replace(/NLB_ANNOTATIONS/g, nlbAnnotations);
       
     } else {
-      // 处理VLLM/SGLang部署
+      // 处理VLLM/SGLang/Custom部署
       const parsedCommand = parseVllmCommand(vllmCommand);
       console.log('Parsed command:', parsedCommand);
       
-      // 从命令中提取模型ID
-      const extractedModelId = extractModelIdFromVllmCommand(vllmCommand);
-      console.log(`Extracted model ID from command: "${extractedModelId}"`);
-      
-      // 基于提取的模型ID自动生成tag
-      finalModelTag = generateModelTag(extractedModelId);
-      console.log(`Auto-generated model tag from "${extractedModelId}": "${finalModelTag}"`);
-      
-      // 编码模型ID用于Kubernetes标签
-      const encodedModelId = encodeModelIdForLabel(extractedModelId);
-      console.log(`Encoded model ID: "${encodedModelId}"`);
-
-      // 使用统一模板，根据命令类型确定服务引擎
-      const servEngine = parsedCommand.commandType === 'sglang' ? 'sglang' : 'vllm';
+      // 根据命令类型确定服务引擎前缀
+      let servEngine;
+      if (parsedCommand.commandType === 'sglang') {
+        servEngine = 'sglang';
+      } else if (parsedCommand.commandType === 'vllm') {
+        servEngine = 'vllm';
+      } else {
+        servEngine = 'custom';  // 自定义命令使用custom前缀
+      }
       console.log(`Using service engine: ${servEngine} for command type: ${parsedCommand.commandType}`);
 
       templatePath = path.join(__dirname, '../templates/vllm-sglang-template.yaml');
@@ -603,12 +528,10 @@ app.post('/api/deploy', async (req, res) => {
               value: "${huggingFaceToken}"`;
       }
       
-      // 替换模板中的占位符 - 注意顺序：先替换更具体的占位符
+      // 替换模板中的占位符
       newYamlContent = templateContent
-        .replace(/SERVENGINE/g, servEngine) // 新增：替换服务引擎标识
-        .replace(/ENCODED_MODEL_ID/g, encodedModelId) // 先替换ENCODED_MODEL_ID
-        .replace(/MODEL_TAG/g, finalModelTag)
-        .replace(/MODEL_ID/g, extractedModelId) // 然后替换MODEL_ID
+        .replace(/SERVENGINE/g, servEngine)
+        .replace(/MODEL_TAG/g, finalDeploymentTag)
         .replace(/REPLICAS_COUNT/g, replicas.toString())
         .replace(/GPU_COUNT/g, parsedCommand.tensorParallelSize.toString())
         .replace(/HF_TOKEN_ENV/g, hfTokenEnv)
@@ -619,11 +542,10 @@ app.post('/api/deploy', async (req, res) => {
     
     // 保存到项目目录中的deployments文件夹
     const deploymentsDir = path.join(__dirname, '../deployments');
-    await fs.ensureDir(deploymentsDir); // 确保目录存在
+    await fs.ensureDir(deploymentsDir);
     
     const accessType = isExternal ? 'external' : 'internal';
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const tempYamlPath = path.join(deploymentsDir, `${finalModelTag}-${deploymentType}-${accessType}-${timestamp}.yaml`);
+    const tempYamlPath = path.join(deploymentsDir, `${finalDeploymentTag}-${deploymentType}-${accessType}.yaml`);
     await fs.writeFile(tempYamlPath, newYamlContent);
     
     console.log(`Generated YAML saved to: ${tempYamlPath}`);
@@ -635,7 +557,7 @@ app.post('/api/deploy', async (req, res) => {
     broadcast({
       type: 'deployment',
       status: 'success',
-      message: `Successfully deployed model: ${finalModelTag} (${accessType} access)`,
+      message: `Successfully deployed: ${finalDeploymentTag} (${accessType} access)`,
       output: applyOutput
     });
     
@@ -646,7 +568,7 @@ app.post('/api/deploy', async (req, res) => {
       yamlPath: tempYamlPath,
       generatedYaml: newYamlContent,
       deploymentType,
-      modelTag: finalModelTag,
+      deploymentTag: finalDeploymentTag,
       accessType
     });
     

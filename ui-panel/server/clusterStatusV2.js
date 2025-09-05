@@ -102,16 +102,16 @@ class ClusterStatusV2 {
           }, 0);
         }
         
-        // 可选：同时获取Pending Pod数量用于调试（不影响可用GPU计算）
-        const allPodsInfo = await this.executeKubectlWithTimeout(
-          `get pods --field-selector spec.nodeName=${nodeName} -o json`,
+        // 可选：同时获取所有Pending Pod数量用于调试（Pending Pod没有nodeName）
+        const allPendingPodsInfo = await this.executeKubectlWithTimeout(
+          `get pods --field-selector status.phase=Pending -o json`,
           10000
         ).catch(() => '{"items":[]}');
         
-        const allPodsData = JSON.parse(allPodsInfo);
-        if (allPodsData.items && Array.isArray(allPodsData.items)) {
-          const pendingPods = allPodsData.items.filter(pod => pod.status?.phase === 'Pending');
-          pendingGPU = pendingPods.reduce((sum, pod) => {
+        const allPendingPodsData = JSON.parse(allPendingPodsInfo);
+        if (allPendingPodsData.items && Array.isArray(allPendingPodsData.items)) {
+          // 计算所有Pending Pod的GPU请求总数（不按节点分配）
+          pendingGPU = allPendingPodsData.items.reduce((sum, pod) => {
             if (pod.spec?.containers) {
               return sum + pod.spec.containers.reduce((containerSum, container) => {
                 const gpuRequest = container.resources?.requests?.['nvidia.com/gpu'];
@@ -281,15 +281,15 @@ class ClusterStatusV2 {
   /**
    * 获取集群统计信息
    */
-  getClusterStats(nodes) {
-    return nodes.reduce((stats, node) => ({
+  async getClusterStats(nodes) {
+    // 计算节点相关的统计
+    const nodeStats = nodes.reduce((stats, node) => ({
       totalNodes: stats.totalNodes + 1,
       readyNodes: stats.readyNodes + (node.nodeReady ? 1 : 0),
       totalGPUs: stats.totalGPUs + node.totalGPU,
       usedGPUs: stats.usedGPUs + node.usedGPU,
       availableGPUs: stats.availableGPUs + node.availableGPU,
       allocatableGPUs: stats.allocatableGPUs + node.allocatableGPU,
-      pendingGPUs: stats.pendingGPUs + (node.pendingGPU || 0),
       errorNodes: stats.errorNodes + (node.error ? 1 : 0)
     }), {
       totalNodes: 0,
@@ -298,9 +298,38 @@ class ClusterStatusV2 {
       usedGPUs: 0,
       availableGPUs: 0,
       allocatableGPUs: 0,
-      pendingGPUs: 0,
       errorNodes: 0
     });
+
+    // 单独计算全局Pending GPU（与节点无关）
+    let pendingGPUs = 0;
+    try {
+      const allPendingPodsInfo = await this.executeKubectlWithTimeout(
+        `get pods --field-selector status.phase=Pending -o json`,
+        10000
+      );
+      
+      const allPendingPodsData = JSON.parse(allPendingPodsInfo);
+      if (allPendingPodsData.items && Array.isArray(allPendingPodsData.items)) {
+        pendingGPUs = allPendingPodsData.items.reduce((sum, pod) => {
+          if (pod.spec?.containers) {
+            return sum + pod.spec.containers.reduce((containerSum, container) => {
+              const gpuRequest = container.resources?.requests?.['nvidia.com/gpu'];
+              return containerSum + (parseInt(gpuRequest) || 0);
+            }, 0);
+          }
+          return sum;
+        }, 0);
+      }
+    } catch (error) {
+      console.warn('Failed to get pending pods:', error.message);
+      pendingGPUs = 0;
+    }
+
+    return {
+      ...nodeStats,
+      pendingGPUs
+    };
   }
 }
 

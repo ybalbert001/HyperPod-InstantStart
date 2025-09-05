@@ -6,8 +6,7 @@ metadata:
   labels:
     app: olm-MODEL_TAG-inference
     model-type: "ollama"
-    model-id: "ENCODED_MODEL_ID"
-    model-tag: "MODEL_TAG"
+    deployment-tag: "MODEL_TAG"
 spec:
   replicas: REPLICAS_COUNT
   selector:

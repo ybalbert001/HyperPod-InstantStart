@@ -6,8 +6,7 @@ metadata:
   labels:
     app: SERVENGINE-MODEL_TAG-inference
     model-type: "SERVENGINE"
-    model-id: "ENCODED_MODEL_ID"
-    model-tag: "MODEL_TAG"
+    deployment-tag: "MODEL_TAG"
 spec:
   replicas: REPLICAS_COUNT
   selector:
