@@ -62,6 +62,10 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
 
   // 根据Docker镜像获取对应的默认命令
   const getDefaultCommandByImage = (dockerImage) => {
+    if (!dockerImage) {
+      return ''; // 没有选择镜像时返回空命令
+    }
+    
     if (dockerImage.includes('sglang')) {
       return `python3 -m sglang.launch_server \\
 --model-path Qwen/Qwen3-0.6B \\
@@ -187,7 +191,7 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
     return null;
   };
 
-  const defaultVllmCommand = getDefaultCommandByImage('vllm/vllm-openai:latest');
+  const defaultVllmCommand = getDefaultCommandByImage(selectedDockerImage || '');
 
   const VLLMForm = () => (
     <Form
@@ -198,7 +202,8 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
         replicas: 1,
         isExternal: true,
         deploymentName: '',
-        dockerImage: 'vllm/vllm-openai:latest'
+        dockerImage: '', // 改为空，用户必须选择
+        vllmCommand: '' // 命令也为空，等待用户选择镜像后自动填充
       }}
     >
       <Form.Item
@@ -261,7 +266,7 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
       >
         <AutoComplete
           options={dockerImageOptions}
-          placeholder="选择预设镜像或输入自定义镜像"
+          placeholder="请先选择Docker镜像以自动生成命令"
           style={{ fontFamily: 'monospace' }}
           onChange={handleDockerImageChange}
           filterOption={false}
@@ -284,7 +289,7 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
       >
         <TextArea
           rows={8}
-          placeholder={defaultVllmCommand}
+          placeholder={selectedDockerImage ? defaultVllmCommand : "请先选择Docker镜像，将自动生成对应的默认命令"}
           style={{ fontFamily: 'monospace', fontSize: '12px' }}
         />
       </Form.Item>
