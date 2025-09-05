@@ -39,6 +39,11 @@ Parameters:
     Default: ""
     Description: Subnet ID where the instance will be launched (leave empty for default subnet)
     
+  SecurityGroupId:
+    Type: String
+    Default: ""
+    Description: Security Group ID to use (required when VpcId/SubnetId are specified, leave empty for default VPC)
+    
   ResourceTag:
     Type: String
     Default: smhp-dev
@@ -47,6 +52,12 @@ Parameters:
 Conditions:
   HasVpcId: !Not [!Equals [!Ref VpcId, ""]]
   HasSubnetId: !Not [!Equals [!Ref SubnetId, ""]]
+  HasSecurityGroupId: !Not [!Equals [!Ref SecurityGroupId, ""]]
+  UseCustomVpc: !And 
+    - !Condition HasVpcId
+    - !Condition HasSubnetId
+    - !Condition HasSecurityGroupId
+  UseDefaultVpc: !Not [!Condition UseCustomVpc]
 
 Resources:
   # IAM Role with timestamped name
@@ -83,13 +94,13 @@ Resources:
       Roles:
         - !Ref SMHPAdminRole
 
-  # Security Group with timestamped name
+  # Security Group with timestamped name (only created for default VPC)
   SecurityGroup:
     Type: AWS::EC2::SecurityGroup
+    Condition: UseDefaultVpc
     Properties:
       GroupName: !Sub '${ResourceTag}-entry-sg'
       GroupDescription: Security group for entry instance
-      VpcId: !If [HasVpcId, !Ref VpcId, !Ref "AWS::NoValue"]
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 22
@@ -107,10 +118,15 @@ Resources:
       ImageId: !Ref AmiId
       InstanceType: !Ref InstanceType
       KeyName: !Ref KeyPairName
-      SubnetId: !If [HasSubnetId, !Ref SubnetId, !Ref "AWS::NoValue"]
-      SecurityGroupIds:
-        - !Ref SecurityGroup
       IamInstanceProfile: !Ref SMHPInstanceProfile
+      SecurityGroupIds: !If [UseCustomVpc, !Ref "AWS::NoValue", [!Ref SecurityGroup]]
+      NetworkInterfaces: !If 
+        - UseCustomVpc
+        - - AssociatePublicIpAddress: true
+            DeviceIndex: 0
+            SubnetId: !Ref SubnetId
+            GroupSet: [!Ref SecurityGroupId]
+        - !Ref "AWS::NoValue"
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:
@@ -258,5 +274,6 @@ Outputs:
     Value: !GetAtt SMHPInstanceProfile.Arn
     Description: ARN of the Instance Profile
   SecurityGroupId:
+    Condition: UseDefaultVpc
     Value: !Ref SecurityGroup
-    Description: Security Group ID
+    Description: Security Group ID (only for default VPC)

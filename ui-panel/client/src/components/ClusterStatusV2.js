@@ -54,6 +54,7 @@ const ClusterStatusV2 = ({ clusterData = [], onRefresh }) => {
       usedGPUs: stats.usedGPUs + node.usedGPU,
       availableGPUs: stats.availableGPUs + node.availableGPU,
       allocatableGPUs: stats.allocatableGPUs + node.allocatableGPU,
+      pendingGPUs: stats.pendingGPUs + (node.pendingGPU || 0),
       errorNodes: stats.errorNodes + (node.error ? 1 : 0)
     }), {
       totalNodes: 0,
@@ -62,6 +63,7 @@ const ClusterStatusV2 = ({ clusterData = [], onRefresh }) => {
       usedGPUs: 0,
       availableGPUs: 0,
       allocatableGPUs: 0,
+      pendingGPUs: 0,
       errorNodes: 0
     });
   };
@@ -109,22 +111,29 @@ const ClusterStatusV2 = ({ clusterData = [], onRefresh }) => {
       dataIndex: 'nodeName',
       key: 'nodeName',
       render: (text, record) => (
-        <Space>
-          <ClusterOutlined />
-          <span style={{ fontFamily: 'monospace' }}>{text}</span>
-          {!record.nodeReady && (
-            <Tooltip title="Node not ready">
-              <WarningOutlined style={{ color: '#faad14' }} />
-            </Tooltip>
+        <div>
+          <Space>
+            <ClusterOutlined />
+            <span style={{ fontFamily: 'monospace' }}>{text}</span>
+            {!record.nodeReady && (
+              <Tooltip title="Node not ready">
+                <WarningOutlined style={{ color: '#faad14' }} />
+              </Tooltip>
+            )}
+          </Space>
+          {record.instanceType && record.instanceType !== 'Unknown' && (
+            <div style={{ fontSize: '12px', color: '#666', marginTop: 2 }}>
+              {record.instanceType}
+            </div>
           )}
-        </Space>
+        </div>
       ),
     },
     {
       title: 'GPU Usage',
       key: 'gpuUsage',
       render: (_, record) => {
-        const { totalGPU, usedGPU, availableGPU, allocatableGPU } = record;
+        const { totalGPU, usedGPU, availableGPU, allocatableGPU, pendingGPU } = record;
         const percentage = totalGPU > 0 ? (usedGPU / totalGPU) * 100 : 0;
         
         return (
@@ -142,6 +151,13 @@ const ClusterStatusV2 = ({ clusterData = [], onRefresh }) => {
                   <Tooltip title={`Total capacity: ${totalGPU}, Allocatable: ${allocatableGPU}`}>
                     <span style={{ color: '#1890ff' }}>
                       (Alloc: {allocatableGPU})
+                    </span>
+                  </Tooltip>
+                )}
+                {pendingGPU > 0 && (
+                  <Tooltip title={`GPU requests from Pending pods (not counted in usage)`}>
+                    <span style={{ color: '#faad14' }}>
+                      Pending: {pendingGPU}
                     </span>
                   </Tooltip>
                 )}
@@ -197,7 +213,7 @@ const ClusterStatusV2 = ({ clusterData = [], onRefresh }) => {
       <div>
         {/* 总体统计 */}
         <Row gutter={16} style={{ marginBottom: 16 }}>
-          <Col span={6}>
+          <Col span={4}>
             <Card size="small">
               <Statistic
                 title="Nodes"
@@ -215,7 +231,7 @@ const ClusterStatusV2 = ({ clusterData = [], onRefresh }) => {
               )}
             </Card>
           </Col>
-          <Col span={6}>
+          <Col span={4}>
             <Card size="small">
               <Statistic
                 title="Total GPUs"
@@ -229,7 +245,7 @@ const ClusterStatusV2 = ({ clusterData = [], onRefresh }) => {
               )}
             </Card>
           </Col>
-          <Col span={6}>
+          <Col span={4}>
             <Card size="small">
               <Statistic
                 title="Used GPUs"
@@ -238,12 +254,32 @@ const ClusterStatusV2 = ({ clusterData = [], onRefresh }) => {
               />
             </Card>
           </Col>
-          <Col span={6}>
+          <Col span={4}>
             <Card size="small">
               <Statistic
-                title="Available"
+                title="Available GPUs"
                 value={stats.availableGPUs}
                 valueStyle={{ color: '#52c41a' }}
+              />
+            </Card>
+          </Col>
+          <Col span={4}>
+            <Card size="small">
+              <Statistic
+                title="Pending GPUs"
+                value={stats.pendingGPUs}
+                valueStyle={{ color: '#faad14' }}
+              />
+            </Card>
+          </Col>
+          <Col span={4}>
+            <Card size="small">
+              <Statistic
+                title="Total Requests GPUs"
+                value={stats.usedGPUs + stats.pendingGPUs}
+                valueStyle={{ 
+                  color: (stats.usedGPUs + stats.pendingGPUs) > stats.totalGPUs ? '#cf1322' : '#666'
+                }}
               />
             </Card>
           </Col>

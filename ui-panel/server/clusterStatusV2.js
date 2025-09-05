@@ -53,8 +53,13 @@ class ClusterStatusV2 {
     const nodeName = node.metadata.name;
     const nodeReady = node.status?.conditions?.find(c => c.type === 'Ready')?.status === 'True';
     
+    // 获取节点实例类型（通常在labels中）
+    const instanceType = node.metadata?.labels?.['node.kubernetes.io/instance-type'] || 
+                        node.metadata?.labels?.['beta.kubernetes.io/instance-type'] ||
+                        'Unknown';
+    
     try {
-      // 并行获取节点信息，使用更高效的jsonpath查询
+      // 并行获取节点信息，使用更高效的查询
       const [capacityInfo, allocatableInfo, podsInfo] = await Promise.all([
         // 获取节点GPU容量
         this.executeKubectlWithTimeout(
@@ -68,29 +73,68 @@ class ClusterStatusV2 {
           10000
         ).catch(() => '0'),
         
-        // 获取该节点上所有Pod的GPU请求
+        // 获取该节点上Running状态Pod的详细信息（避免Pending Pod导致GPU使用率虚高）
         this.executeKubectlWithTimeout(
-          `get pods --field-selector spec.nodeName=${nodeName} -o "jsonpath={range .items[*]}{range .spec.containers[*]}{.resources.requests['nvidia\\.com/gpu']}{' '}{end}{end}"`,
+          `get pods --field-selector spec.nodeName=${nodeName},status.phase=Running -o json`,
           15000
-        ).catch(() => '')
+        ).catch(() => '{"items":[]}')
       ]);
 
       const totalGPU = parseInt(capacityInfo) || 0;
       const allocatableGPU = parseInt(allocatableInfo) || 0;
       
-      // 计算已使用的GPU - 从jsonpath结果中解析
+      // 计算已使用的GPU - 只统计Running状态Pod的GPU请求
       let usedGPU = 0;
-      if (podsInfo) {
-        const gpuRequests = podsInfo.split(' ').filter(Boolean);
-        usedGPU = gpuRequests.reduce((sum, req) => sum + (parseInt(req) || 0), 0);
+      let pendingGPU = 0;
+      
+      try {
+        const podsData = JSON.parse(podsInfo);
+        if (podsData.items && Array.isArray(podsData.items)) {
+          // 统计Running Pod的GPU请求
+          usedGPU = podsData.items.reduce((sum, pod) => {
+            if (pod.spec?.containers) {
+              return sum + pod.spec.containers.reduce((containerSum, container) => {
+                const gpuRequest = container.resources?.requests?.['nvidia.com/gpu'];
+                return containerSum + (parseInt(gpuRequest) || 0);
+              }, 0);
+            }
+            return sum;
+          }, 0);
+        }
+        
+        // 可选：同时获取Pending Pod数量用于调试（不影响可用GPU计算）
+        const allPodsInfo = await this.executeKubectlWithTimeout(
+          `get pods --field-selector spec.nodeName=${nodeName} -o json`,
+          10000
+        ).catch(() => '{"items":[]}');
+        
+        const allPodsData = JSON.parse(allPodsInfo);
+        if (allPodsData.items && Array.isArray(allPodsData.items)) {
+          const pendingPods = allPodsData.items.filter(pod => pod.status?.phase === 'Pending');
+          pendingGPU = pendingPods.reduce((sum, pod) => {
+            if (pod.spec?.containers) {
+              return sum + pod.spec.containers.reduce((containerSum, container) => {
+                const gpuRequest = container.resources?.requests?.['nvidia.com/gpu'];
+                return containerSum + (parseInt(gpuRequest) || 0);
+              }, 0);
+            }
+            return sum;
+          }, 0);
+        }
+      } catch (parseError) {
+        console.warn(`Failed to parse pods JSON for node ${nodeName}:`, parseError.message);
+        usedGPU = 0;
+        pendingGPU = 0;
       }
 
       return {
         nodeName,
+        instanceType,
         totalGPU,
         usedGPU,
         availableGPU: Math.max(0, allocatableGPU - usedGPU),
         allocatableGPU,
+        pendingGPU, // 新增：Pending状态Pod请求的GPU数量（用于调试）
         nodeReady,
         fetchTime: Date.now()
       };
@@ -98,10 +142,12 @@ class ClusterStatusV2 {
       console.error(`Error fetching GPU info for node ${nodeName}:`, error.message);
       return {
         nodeName,
+        instanceType: 'Unknown',
         totalGPU: 0,
         usedGPU: 0,
         availableGPU: 0,
         allocatableGPU: 0,
+        pendingGPU: 0,
         nodeReady,
         error: error.message || 'Unable to fetch GPU info',
         fetchTime: Date.now()
@@ -128,10 +174,12 @@ class ClusterStatusV2 {
         console.error(`Failed to fetch info for node ${nodes[index]?.metadata?.name}:`, result.reason);
         return {
           nodeName: nodes[index]?.metadata?.name || 'unknown',
+          instanceType: 'Unknown',
           totalGPU: 0,
           usedGPU: 0,
           availableGPU: 0,
           allocatableGPU: 0,
+          pendingGPU: 0,
           nodeReady: false,
           error: 'Failed to fetch node info',
           fetchTime: Date.now()
@@ -241,6 +289,7 @@ class ClusterStatusV2 {
       usedGPUs: stats.usedGPUs + node.usedGPU,
       availableGPUs: stats.availableGPUs + node.availableGPU,
       allocatableGPUs: stats.allocatableGPUs + node.allocatableGPU,
+      pendingGPUs: stats.pendingGPUs + (node.pendingGPU || 0),
       errorNodes: stats.errorNodes + (node.error ? 1 : 0)
     }), {
       totalNodes: 0,
@@ -249,6 +298,7 @@ class ClusterStatusV2 {
       usedGPUs: 0,
       availableGPUs: 0,
       allocatableGPUs: 0,
+      pendingGPUs: 0,
       errorNodes: 0
     });
   }
