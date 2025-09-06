@@ -7,7 +7,8 @@ import {
   Badge,
   Button,
   Typography,
-  message
+  message,
+  Popconfirm
 } from 'antd';
 import { 
   CheckCircleOutlined, 
@@ -16,7 +17,8 @@ import {
   LoadingOutlined,
   ReloadOutlined,
   ApiOutlined,
-  ContainerOutlined
+  ContainerOutlined,
+  DeleteOutlined
 } from '@ant-design/icons';
 import globalRefreshManager from '../hooks/useGlobalRefresh';
 import operationRefreshManager from '../hooks/useOperationRefresh';
@@ -28,6 +30,42 @@ const { Text } = Typography;
 const StatusMonitor = ({ pods, services, onRefresh, activeTab }) => {
   const [loading, setLoading] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(null);
+  const [rayJobs, setRayJobs] = useState([]);
+
+  // 获取RayJobs
+  const fetchRayJobs = async () => {
+    try {
+      const response = await fetch('/api/rayjobs');
+      const data = await response.json();
+      setRayJobs(data);
+    } catch (error) {
+      console.error('Error fetching RayJobs:', error);
+      setRayJobs([]);
+    }
+  };
+
+  // 删除RayJob
+  const handleDeleteRayJob = async (jobName) => {
+    try {
+      setLoading(true);
+      const response = await fetch(`/api/rayjobs/${jobName}`, {
+        method: 'DELETE'
+      });
+      
+      if (response.ok) {
+        message.success(`RayJob ${jobName} deletion initiated`);
+        // 刷新会通过WebSocket自动触发
+      } else {
+        const error = await response.json();
+        message.error(`Failed to delete RayJob: ${error.error}`);
+      }
+    } catch (error) {
+      console.error('Error deleting RayJob:', error);
+      message.error('Failed to delete RayJob');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // 注册到全局刷新管理器，替代useAutoRefresh
   useEffect(() => {
@@ -37,6 +75,7 @@ const StatusMonitor = ({ pods, services, onRefresh, activeTab }) => {
       if (onRefresh) {
         try {
           await onRefresh();
+          await fetchRayJobs(); // 同时获取RayJobs
           setLastUpdate(new Date());
         } catch (error) {
           console.error('Refresh error in StatusMonitor:', error);
@@ -51,6 +90,9 @@ const StatusMonitor = ({ pods, services, onRefresh, activeTab }) => {
 
     // 🚀 注册到操作刷新管理器
     operationRefreshManager.subscribe(componentId, refreshFunction);
+
+    // 初始获取RayJobs
+    fetchRayJobs();
 
     return () => {
       globalRefreshManager.unsubscribe(componentId);
@@ -231,6 +273,79 @@ const StatusMonitor = ({ pods, services, onRefresh, activeTab }) => {
         }
       },
     },
+  ];
+
+  // RayJob表格列定义
+  const rayJobColumns = [
+    {
+      title: 'Job Name',
+      dataIndex: ['metadata', 'name'],
+      key: 'name',
+      render: (name) => <Text strong>{name}</Text>
+    },
+    {
+      title: 'Job Status',
+      dataIndex: ['status', 'jobStatus'],
+      key: 'jobStatus',
+      render: (status) => {
+        const statusConfig = {
+          'RUNNING': { color: 'processing', icon: <LoadingOutlined /> },
+          'SUCCEEDED': { color: 'success', icon: <CheckCircleOutlined /> },
+          'FAILED': { color: 'error', icon: <ExclamationCircleOutlined /> },
+          'PENDING': { color: 'warning', icon: <ClockCircleOutlined /> }
+        };
+        const config = statusConfig[status] || { color: 'default', icon: null };
+        return <Tag color={config.color} icon={config.icon}>{status || 'Unknown'}</Tag>;
+      }
+    },
+    {
+      title: 'Ray Cluster',
+      dataIndex: ['status', 'rayClusterName'],
+      key: 'rayClusterName',
+      render: (name) => <Text code>{name}</Text>
+    },
+    {
+      title: 'Start Time',
+      dataIndex: ['status', 'startTime'],
+      key: 'startTime',
+      render: (time) => time ? new Date(time).toLocaleString() : 'N/A'
+    },
+    {
+      title: 'Age',
+      dataIndex: ['metadata', 'creationTimestamp'],
+      key: 'age',
+      render: (timestamp) => {
+        if (!timestamp) return 'N/A';
+        const age = Date.now() - new Date(timestamp).getTime();
+        const minutes = Math.floor(age / 60000);
+        const hours = Math.floor(minutes / 60);
+        if (hours > 0) return `${hours}h ${minutes % 60}m`;
+        return `${minutes}m`;
+      }
+    },
+    {
+      title: 'Actions',
+      key: 'actions',
+      render: (_, record) => (
+        <Popconfirm
+          title="Delete RayJob"
+          description={`Are you sure you want to delete "${record.metadata.name}"?`}
+          onConfirm={() => handleDeleteRayJob(record.metadata.name)}
+          okText="Yes"
+          cancelText="No"
+        >
+          <Button
+            type="primary"
+            danger
+            size="small"
+            icon={<DeleteOutlined />}
+            loading={loading}
+          >
+            Delete
+          </Button>
+        </Popconfirm>
+      )
+    }
   ];
 
   // Service表格列定义
@@ -451,6 +566,22 @@ const StatusMonitor = ({ pods, services, onRefresh, activeTab }) => {
       );
     }
 
+    if (activeTab === 'rayjobs') {
+      return (
+        <div>
+          {refreshButton}
+          <Table
+            columns={rayJobColumns}
+            dataSource={rayJobs}
+            rowKey={(job) => job.metadata.uid}
+            size="small"
+            pagination={{ pageSize: 10 }}
+            loading={loading}
+          />
+        </div>
+      );
+    }
+
     return <div>Unsupported tab: {activeTab}</div>;
   }
 
@@ -556,6 +687,59 @@ const StatusMonitor = ({ pods, services, onRefresh, activeTab }) => {
             columns={serviceColumns}
             dataSource={services}
             rowKey={(service) => service.metadata.uid}
+            size="small"
+            pagination={{ pageSize: 10 }}
+            loading={loading}
+          />
+        </div>
+      </TabPane>
+
+      <TabPane 
+        tab={
+          <Space>
+            <ApiOutlined />
+            RayJobs
+            <Badge count={rayJobs.length} style={{ backgroundColor: '#722ed1' }} />
+          </Space>
+        } 
+        key="rayjobs"
+      >
+        <div style={{ padding: '16px' }}>
+          {!activeTab && (
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center', 
+              marginBottom: '16px' 
+            }}>
+              <div>
+                {lastUpdate && (
+                  <Text type="secondary" style={{ fontSize: '12px' }}>
+                    Last updated: {lastUpdate.toLocaleTimeString()}
+                  </Text>
+                )}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Text type="secondary" style={{ fontSize: '11px', color: '#1890ff' }}>
+                  • Managed by Global Refresh
+                </Text>
+                <Button 
+                  size="small" 
+                  icon={<ReloadOutlined />}
+                  loading={loading}
+                  onClick={() => handleRefresh(true)}
+                  style={{ fontSize: '11px', height: '20px', padding: '0 6px' }}
+                >
+                  Refresh
+                </Button>
+              </div>
+            </div>
+          )}
+
+          <Table
+            columns={rayJobColumns}
+            dataSource={rayJobs}
+            rowKey={(job) => job.metadata.uid}
             size="small"
             pagination={{ pageSize: 10 }}
             loading={loading}

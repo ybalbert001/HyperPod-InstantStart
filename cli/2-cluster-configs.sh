@@ -84,6 +84,11 @@ execute_aws_command "helm install aws-load-balancer-controller eks/aws-load-bala
 # kubectl get deployment -n kube-system aws-load-balancer-controller
 # kubectl logs -n kube-system aws-load-balancer-controller-86799fd799-gnf8h --tail=10
 
+helm repo add kuberay https://ray-project.github.io/kuberay-helm/
+helm repo update
+
+helm install kuberay-operator kuberay/kuberay-operator --version 1.2.0 --namespace kube-system
+
 helm ls -n kube-system
 
 PUBLIC_SUBNETS=$(aws ec2 describe-subnets --filters "[ {\"Name\":\"vpc-id\",\"Values\":[\"${VPC_ID}\"]}, {\"Name\":\"map-public-ip-on-launch\",\"Values\":[\"true\"]} ]" --query 'Subnets[*].{SubnetId:SubnetId}' --output text)

@@ -1,0 +1,128 @@
+apiVersion: ray.io/v1
+kind: RayJob
+metadata:
+  name: JOB_NAME
+  namespace: default
+spec:
+  entrypoint: bash /s3/train-recipes/ENTRY_POINT_PATH
+  backoffLimit: 0
+  shutdownAfterJobFinishes: true
+  ttlSecondsAfterFinished: 3600
+  rayClusterSpec:
+    rayVersion: '2.9.0'
+    headGroupSpec:
+      rayStartParams:
+        dashboard-host: '0.0.0.0'
+        dashboard-port: '8265'
+      template:
+        spec:
+          containers:
+          - name: ray-head
+            image: DOCKER_IMAGE
+            resources:
+              limits:
+                cpu: 20
+                memory: 80Gi
+                nvidia.com/gpu: GPU_PER_NODE
+                vpc.amazonaws.com/efa: EFA_PER_NODE
+              requests:
+                cpu: 20
+                memory: 80Gi
+                nvidia.com/gpu: GPU_PER_NODE
+                vpc.amazonaws.com/efa: EFA_PER_NODE
+            env:
+            - name: PYTHONPATH
+              value: "/verl_workspace:/verl_workspace/verl"
+            - name: FI_PROVIDER
+              value: "efa"
+            - name: NCCL_DEBUG
+              value: "INFO"
+            - name: NCCL_SOCKET_IFNAME
+              value: "eth0"
+            volumeMounts:
+            - name: persistent-storage-s3
+              mountPath: /s3
+              readOnly: false
+            - name: shmem
+              mountPath: /dev/shm
+            - name: local
+              mountPath: /local
+            - name: inst-nvme
+              mountPath: /ckpt-path
+            - name: local-cache
+              mountPath: /root/.cache
+          volumes:
+          - name: shmem
+            hostPath: 
+              path: /dev/shm
+          - name: local
+            hostPath:
+              path: /mnt/k8s-disks/0
+          - name: local-cache
+            hostPath:
+              path: /opt/dlami/nvme/.cache
+          - name: inst-nvme
+            hostPath:
+              path: /opt/dlami/nvme/checkpoints/
+          - name: persistent-storage-s3
+            persistentVolumeClaim:
+              claimName: s3-claim
+    workerGroupSpecs:
+    - replicas: WORKER_REPLICAS
+      minReplicas: 0
+      maxReplicas: MAX_REPLICAS
+      groupName: worker-group
+      rayStartParams: {}
+      template:
+        spec:
+          containers:
+          - name: ray-worker
+            image: DOCKER_IMAGE
+            resources:
+              limits:
+                cpu: 20
+                memory: 80Gi
+                nvidia.com/gpu: GPU_PER_NODE
+                vpc.amazonaws.com/efa: EFA_PER_NODE
+              requests:
+                cpu: 20
+                memory: 80Gi
+                nvidia.com/gpu: GPU_PER_NODE
+                vpc.amazonaws.com/efa: EFA_PER_NODE
+            env:
+            - name: PYTHONPATH
+              value: "/verl_workspace:/verl_workspace/verl"
+            - name: FI_PROVIDER
+              value: "efa"
+            - name: NCCL_DEBUG
+              value: "INFO"
+            - name: NCCL_SOCKET_IFNAME
+              value: "eth0"
+            volumeMounts:
+            - name: persistent-storage-s3
+              mountPath: /s3
+              readOnly: false
+            - name: shmem
+              mountPath: /dev/shm
+            - name: local
+              mountPath: /local
+            - name: inst-nvme
+              mountPath: /ckpt-path
+            - name: local-cache
+              mountPath: /root/.cache
+          volumes:
+          - name: shmem
+            hostPath: 
+              path: /dev/shm
+          - name: local
+            hostPath:
+              path: /mnt/k8s-disks/0
+          - name: local-cache
+            hostPath:
+              path: /opt/dlami/nvme/.cache
+          - name: inst-nvme
+            hostPath:
+              path: /opt/dlami/nvme/checkpoints/
+          - name: persistent-storage-s3
+            persistentVolumeClaim:
+              claimName: s3-claim

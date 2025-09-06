@@ -95,7 +95,7 @@ const HyperPodRecipes = ({ onLaunch, deploymentStatus }) => {
           style={{ height: '100%', overflow: 'hidden' }}
         >
           <div style={{ height: '100%', overflow: 'auto', paddingRight: '8px' }}>
-            <VerlRecipePanel />
+            <VerlRecipePanel onLaunch={onLaunch} deploymentStatus={deploymentStatus} />
           </div>
         </TabPane>
       </Tabs>

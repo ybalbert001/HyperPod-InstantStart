@@ -1,0 +1,39 @@
+FROM ubuntu:22.04
+
+# 避免交互式安装
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 安装基础工具
+RUN apt-get update && \
+    apt-get install -y curl unzip tar gzip jq ca-certificates && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# 安装AWS CLI v2
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
+    unzip awscliv2.zip && \
+    ./aws/install && \
+    rm -rf awscliv2.zip aws/
+
+# 安装kubectl
+RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && \
+    chmod +x kubectl && \
+    mv kubectl /usr/local/bin/
+
+# 安装eksctl
+RUN curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp && \
+    mv /tmp/eksctl /usr/local/bin
+
+# 安装helm
+RUN curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+WORKDIR /workspace
+
+# 复制脚本文件
+COPY . .
+
+# 设置执行权限
+RUN chmod +x *.sh
+
+# 默认命令
+CMD ["/bin/bash"]

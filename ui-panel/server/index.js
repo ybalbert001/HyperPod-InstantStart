@@ -37,12 +37,12 @@ const wss = new WebSocket.Server({ port: WS_PORT });
 // 存储活跃的日志流
 const activeLogStreams = new Map();
 
-// 日志存储配置
-const LOG_BASE_DIR = path.join(__dirname, '..', 'logs', 'hyperpodpytorchjob');
+// 日志存储配置 - 简化路径结构
+const LOGS_BASE_DIR = path.join(__dirname, '..', 'logs');
 
-// 确保日志目录存在
+// 确保日志目录存在 - 简化版本，直接使用任务名
 function ensureLogDirectory(jobName, podName) {
-  const jobLogDir = path.join(LOG_BASE_DIR, jobName);
+  const jobLogDir = path.join(LOGS_BASE_DIR, jobName);
   if (!fs.existsSync(jobLogDir)) {
     fs.mkdirSync(jobLogDir, { recursive: true });
   }
@@ -375,6 +375,228 @@ app.get('/api/cluster-status', handleClusterStatusV2);
 app.post('/api/cluster-status/clear-cache', handleClearCache);
 app.get('/api/cluster-status/cache-status', handleCacheStatus);
 
+// 统一日志流管理 - 避免冲突
+const unifiedLogStreams = new Map(); // 统一管理所有日志流
+
+// 启动统一日志流（支持自动收集和WebSocket流式传输）
+function startUnifiedLogStream(jobName, podName, options = {}) {
+  const streamKey = `${jobName}-${podName}`;
+  const { ws = null, autoCollection = false } = options;
+  
+  // 如果已经有该pod的日志流，添加WebSocket连接但不重启进程
+  if (unifiedLogStreams.has(streamKey)) {
+    const existing = unifiedLogStreams.get(streamKey);
+    if (ws && !existing.webSockets.has(ws)) {
+      existing.webSockets.add(ws);
+      console.log(`Added WebSocket to existing log stream for ${streamKey}`);
+      
+      // 发送连接成功消息
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'log_stream_started',
+          jobName: jobName,
+          podName: podName,
+          timestamp: new Date().toISOString()
+        }));
+      }
+    }
+    return;
+  }
+  
+  console.log(`🚀 Starting unified log stream for pod: ${podName} in job: ${jobName} (auto: ${autoCollection})`);
+  
+  // 创建日志文件路径
+  const logFilePath = ensureLogDirectory(jobName, podName);
+  const logStream = fs.createWriteStream(logFilePath, { flags: 'a' });
+  
+  // 启动kubectl logs命令
+  const logProcess = spawn('kubectl', ['logs', '-f', podName], {
+    stdio: ['pipe', 'pipe', 'pipe']
+  });
+  
+  // 创建WebSocket集合
+  const webSockets = new Set();
+  if (ws) {
+    webSockets.add(ws);
+  }
+  
+  // 存储统一的日志流信息
+  unifiedLogStreams.set(streamKey, {
+    process: logProcess,
+    logStream: logStream,
+    webSockets: webSockets,
+    jobName: jobName,
+    podName: podName,
+    autoCollection: autoCollection,
+    startTime: new Date().toISOString()
+  });
+  
+  // 处理标准输出
+  logProcess.stdout.on('data', (data) => {
+    const logLine = data.toString();
+    const timestamp = new Date().toISOString();
+    
+    // 写入文件（带时间戳）
+    logStream.write(`[${timestamp}] ${logLine}`);
+    
+    // 发送到所有连接的WebSocket
+    webSockets.forEach(socket => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+          type: 'log_data',
+          jobName: jobName,
+          podName: podName,
+          data: logLine,
+          timestamp: timestamp
+        }));
+      }
+    });
+  });
+  
+  // 处理错误输出
+  logProcess.stderr.on('data', (data) => {
+    const errorLine = data.toString();
+    const timestamp = new Date().toISOString();
+    
+    // 写入文件
+    logStream.write(`[${timestamp}] ERROR: ${errorLine}`);
+    
+    // 发送错误到WebSocket
+    webSockets.forEach(socket => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+          type: 'log_error',
+          jobName: jobName,
+          podName: podName,
+          error: errorLine,
+          timestamp: timestamp
+        }));
+      }
+    });
+  });
+  
+  // 处理进程退出
+  logProcess.on('close', (code) => {
+    console.log(`Unified log stream for ${podName} exited with code ${code}`);
+    logStream.end();
+    
+    // 通知所有WebSocket连接
+    webSockets.forEach(socket => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+          type: 'log_stream_closed',
+          jobName: jobName,
+          podName: podName,
+          timestamp: new Date().toISOString()
+        }));
+      }
+    });
+    
+    unifiedLogStreams.delete(streamKey);
+  });
+  
+  // 处理进程错误
+  logProcess.on('error', (error) => {
+    console.error(`Unified log stream error for ${podName}:`, error);
+    logStream.end();
+    
+    // 通知所有WebSocket连接
+    webSockets.forEach(socket => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+          type: 'log_stream_error',
+          jobName: jobName,
+          podName: podName,
+          error: error.message,
+          timestamp: new Date().toISOString()
+        }));
+      }
+    });
+    
+    unifiedLogStreams.delete(streamKey);
+  });
+  
+  // 发送启动成功消息
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: 'log_stream_started',
+      jobName: jobName,
+      podName: podName,
+      timestamp: new Date().toISOString()
+    }));
+  }
+}
+
+// 从统一日志流中移除WebSocket连接
+function removeWebSocketFromLogStream(ws, jobName, podName) {
+  const streamKey = `${jobName}-${podName}`;
+  const stream = unifiedLogStreams.get(streamKey);
+  
+  if (stream) {
+    stream.webSockets.delete(ws);
+    console.log(`Removed WebSocket from log stream ${streamKey}, remaining: ${stream.webSockets.size}`);
+    
+    // 如果没有WebSocket连接且不是自动收集，停止日志流
+    if (stream.webSockets.size === 0 && !stream.autoCollection) {
+      console.log(`No more WebSocket connections for ${streamKey}, stopping log stream`);
+      stream.process.kill();
+      stream.logStream.end();
+      unifiedLogStreams.delete(streamKey);
+    }
+  }
+}
+
+// 为训练任务自动开始日志收集
+async function startAutoLogCollectionForJob(jobName) {
+  try {
+    console.log(`🔍 Starting auto log collection for training job: ${jobName}`);
+    
+    // 获取该训练任务的所有pods
+    const output = await executeKubectl('get pods -o json');
+    const result = JSON.parse(output);
+    
+    const jobPods = result.items.filter(pod => {
+      const labels = pod.metadata.labels || {};
+      const ownerReferences = pod.metadata.ownerReferences || [];
+      
+      return labels['training-job-name'] === jobName || 
+             labels['app'] === jobName ||
+             ownerReferences.some(ref => ref.name === jobName) ||
+             pod.metadata.name.includes(jobName);
+    });
+    
+    // 为每个运行中的pod开始自动日志收集
+    jobPods.forEach(pod => {
+      if (pod.status.phase === 'Running' || pod.status.phase === 'Pending') {
+        startUnifiedLogStream(jobName, pod.metadata.name, { autoCollection: true });
+      }
+    });
+    
+    console.log(`✅ Started auto log collection for ${jobPods.length} pods in job ${jobName}`);
+  } catch (error) {
+    console.error(`❌ Failed to start auto log collection for job ${jobName}:`, error);
+  }
+}
+
+// 修改原有的startLogStream函数，使用统一管理
+function startLogStream(ws, jobName, podName) {
+  startUnifiedLogStream(jobName, podName, { ws: ws });
+}
+
+// 修改原有的stopLogStream函数
+function stopLogStream(ws, jobName, podName) {
+  removeWebSocketFromLogStream(ws, jobName, podName);
+  
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: 'log_stream_stopped',
+      jobName: jobName,
+      podName: podName,
+      timestamp: new Date().toISOString()
+    }));
+  }
+}
+
 // 应用状态V2 API - 优化版本
 app.get('/api/v2/pods', handlePodsV2);
 app.get('/api/v2/services', handleServicesV2);
@@ -587,6 +809,68 @@ app.post('/api/deploy', async (req, res) => {
     });
   }
 });
+
+// 统一的训练YAML部署函数
+async function deployTrainingYaml(recipeType, jobName, yamlContent) {
+  try {
+    // 确保temp目录存在
+    const tempDir = path.join(__dirname, '../temp');
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+
+    // 确保deployments/trainings目录存在
+    const trainingsDir = path.join(__dirname, '../deployments/trainings');
+    if (!fs.existsSync(trainingsDir)) {
+      fs.mkdirSync(trainingsDir, { recursive: true });
+    }
+
+    // 写入临时文件（用于kubectl apply）
+    const tempFileName = `${recipeType}-${jobName}-${Date.now()}.yaml`;
+    const tempFilePath = path.join(tempDir, tempFileName);
+    await fs.writeFile(tempFilePath, yamlContent);
+
+    // 写入永久文件（用于记录）
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const permanentFileName = `${recipeType}_${timestamp}.yaml`;
+    const permanentFilePath = path.join(trainingsDir, permanentFileName);
+    await fs.writeFile(permanentFilePath, yamlContent);
+
+    console.log(`${recipeType} training YAML saved to: ${permanentFilePath}`);
+
+    // 应用YAML配置
+    const applyOutput = await executeKubectl(`apply -f ${tempFilePath}`);
+    console.log(`${recipeType} training kubectl apply output:`, applyOutput);
+
+    // 清理临时文件
+    fs.unlinkSync(tempFilePath);
+
+    // 发送WebSocket广播
+    broadcast({
+      type: 'training_launch',
+      status: 'success',
+      message: `Successfully launched ${recipeType} training job: ${jobName}`,
+      output: applyOutput
+    });
+
+    return {
+      success: true,
+      permanentFileName,
+      permanentFilePath,
+      applyOutput
+    };
+
+  } catch (error) {
+    // 发送错误广播
+    broadcast({
+      type: 'training_launch',
+      status: 'error',
+      message: `${recipeType} training launch failed: ${error.message}`
+    });
+
+    throw error;
+  }
+}
 
 // 生成并部署HyperPod Torch训练任务 - 专门用于Torch训练
 app.post('/api/launch-torch-training', async (req, res) => {
@@ -968,14 +1252,14 @@ app.get('/api/llamafactory-config/load', async (req, res) => {
     if (!fs.existsSync(configPath)) {
       // 返回默认配置
       const defaultConfig = {
-        trainingJobName: 'torchrecipe-1',
-        dockerImage: 'ACCOUNTID.dkr.ecr.REGION.amazonaws.com/REPONAME:latest',
-        instanceType: 'ml.g5.12xlarge',
-        nprocPerNode: 1,
+        trainingJobName: 'lmf-v1',
+        dockerImage: '633205212955.dkr.ecr.us-west-2.amazonaws.com/sm-training-op-torch26-smhp-op-v2:latest',
+        instanceType: 'ml.g6.12xlarge',
+        nprocPerNode: 4,
         replicas: 1,
-        efaCount: 16,
+        efaCount: 1,
         lmfRecipeRunPath: '/s3/train-recipes/llama-factory-project/',
-        lmfRecipeYamlFile: 'yaml_template.yaml',
+        lmfRecipeYamlFile: 'qwen_full_dist_template.yaml',
         mlflowTrackingUri: '',
         logMonitoringConfig: ''
       };
@@ -1357,22 +1641,13 @@ app.get('/api/verl-config/load', async (req, res) => {
     if (!fs.existsSync(configPath)) {
       // 返回默认配置
       const defaultConfig = {
-        trainingJobName: 'verl-training-job-1',
-        dockerImage: '633205212955.dkr.ecr.us-west-2.amazonaws.com/verl-training:latest',
-        instanceType: 'ml.p4d.24xlarge',
-        nprocPerNode: 8,
-        replicas: 2,
-        baseModel: 'meta-llama/Llama-2-7b-hf',
-        rewardModel: 'anthropic/hh-rlhf-reward-model',
-        learningRate: 1e-5,
-        batchSize: 32,
-        maxSteps: 1000,
-        saveSteps: 100,
-        evalSteps: 50,
-        warmupSteps: 100,
-        entryScriptPath: '/s3/verl_training/scripts/train_verl.py',
-        mlflowTrackingUri: '',
-        advancedConfig: ''
+        jobName: 'verl-training-a1',
+        instanceType: 'ml.g5.12xlarge',
+        entryPointPath: 'verl-project/src/qwen-3b-grpo-kuberay.sh',
+        dockerImage: '633205212955.dkr.ecr.us-west-2.amazonaws.com/hypd-verl:latest',
+        workerReplicas: 1,
+        gpuPerNode: 4,
+        efaPerNode: 1
       };
       
       return res.json({
@@ -1401,25 +1676,194 @@ app.get('/api/verl-config/load', async (req, res) => {
   }
 });
 
+// 生成并部署VERL训练任务 - 专门用于VERL训练
+app.post('/api/launch-verl-training', async (req, res) => {
+  try {
+    console.log('Raw VERL training request body:', JSON.stringify(req.body, null, 2));
+    
+    const {
+      jobName,
+      instanceType = 'ml.g5.12xlarge',
+      entryPointPath,
+      dockerImage,
+      workerReplicas = 1,
+      gpuPerNode = 4,
+      efaPerNode = 1,
+      recipeType
+    } = req.body;
+
+    console.log('VERL training launch request parsed:', { 
+      jobName,
+      instanceType,
+      entryPointPath,
+      dockerImage,
+      workerReplicas,
+      gpuPerNode,
+      efaPerNode,
+      recipeType
+    });
+
+    // 验证必需参数
+    if (!jobName) {
+      return res.status(400).json({
+        success: false,
+        error: 'Job name is required'
+      });
+    }
+
+    if (!entryPointPath) {
+      return res.status(400).json({
+        success: false,
+        error: 'Entry point path is required'
+      });
+    }
+
+    if (!dockerImage) {
+      return res.status(400).json({
+        success: false,
+        error: 'Docker image is required'
+      });
+    }
+
+    // 读取VERL训练任务模板
+    const templatePath = path.join(__dirname, '../templates/verl-training-template.yaml');
+    const templateContent = await fs.readFile(templatePath, 'utf8');
+    
+    // 替换模板中的占位符
+    const newYamlContent = templateContent
+      .replace(/JOB_NAME/g, jobName)
+      .replace(/ENTRY_POINT_PATH/g, entryPointPath)
+      .replace(/DOCKER_IMAGE/g, dockerImage)
+      .replace(/WORKER_REPLICAS/g, workerReplicas.toString())
+      .replace(/MAX_REPLICAS/g, Math.max(3, workerReplicas + 2).toString())
+      .replace(/GPU_PER_NODE/g, gpuPerNode.toString())
+      .replace(/EFA_PER_NODE/g, efaPerNode.toString());
+
+    console.log('Generated VERL YAML content preview:', newYamlContent.substring(0, 500) + '...');
+
+    // 使用统一的部署函数
+    const deployResult = await deployTrainingYaml('verl', jobName, newYamlContent);
+
+    res.json({
+      success: true,
+      message: `VERL training job "${jobName}" launched successfully`,
+      jobName: jobName,
+      templateUsed: 'verl-training-template.yaml',
+      savedTemplate: deployResult.permanentFileName,
+      savedTemplatePath: deployResult.permanentFilePath,
+      output: deployResult.applyOutput
+    });
+
+  } catch (error) {
+    console.error('VERL training launch error:', error);
+    
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Unknown error occurred'
+    });
+  }
+});
+
+// 获取所有RayJob
+app.get('/api/rayjobs', async (req, res) => {
+  try {
+    const output = await executeKubectl('get rayjobs -o json');
+    const rayjobs = JSON.parse(output);
+    res.json(rayjobs.items);
+  } catch (error) {
+    console.error('RayJobs fetch error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 删除指定的RayJob
+app.delete('/api/rayjobs/:jobName', async (req, res) => {
+  try {
+    const { jobName } = req.params;
+    console.log(`Deleting RayJob: ${jobName}`);
+    
+    const output = await executeKubectl(`delete rayjob ${jobName}`);
+    console.log('RayJob delete output:', output);
+    
+    // 发送WebSocket广播
+    broadcast({
+      type: 'rayjob_deleted',
+      status: 'success',
+      message: `RayJob "${jobName}" deleted successfully`,
+      jobName: jobName
+    });
+    
+    res.json({
+      success: true,
+      message: `RayJob "${jobName}" deleted successfully`,
+      output: output
+    });
+  } catch (error) {
+    console.error('Error deleting RayJob:', error);
+    
+    broadcast({
+      type: 'rayjob_deleted',
+      status: 'error',
+      message: `Failed to delete RayJob: ${error.message}`
+    });
+    
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // 获取所有HyperPod训练任务
 app.get('/api/training-jobs', async (req, res) => {
   try {
-    console.log('Fetching HyperPod training jobs...');
-    const output = await executeKubectl('get hyperpodpytorchjob -o json');
-    const result = JSON.parse(output);
+    console.log('Fetching training jobs (HyperPod PytorchJob + RayJob)...');
     
-    const trainingJobs = result.items.map(job => ({
-      name: job.metadata.name,
-      namespace: job.metadata.namespace || 'default',
-      creationTimestamp: job.metadata.creationTimestamp,
-      status: job.status || {},
-      spec: {
-        replicas: job.spec?.replicaSpecs?.[0]?.replicas || 0,
-        nprocPerNode: job.spec?.nprocPerNode || 0
-      }
-    }));
+    // 获取HyperPod PytorchJob
+    let hyperpodJobs = [];
+    try {
+      const hyperpodOutput = await executeKubectl('get hyperpodpytorchjob -o json');
+      const hyperpodResult = JSON.parse(hyperpodOutput);
+      hyperpodJobs = hyperpodResult.items.map(job => ({
+        name: job.metadata.name,
+        namespace: job.metadata.namespace || 'default',
+        creationTimestamp: job.metadata.creationTimestamp,
+        status: job.status || {},
+        type: 'hyperpod',
+        spec: {
+          replicas: job.spec?.replicaSpecs?.[0]?.replicas || 0,
+          nprocPerNode: job.spec?.nprocPerNode || 0
+        }
+      }));
+    } catch (error) {
+      console.log('No HyperPod PytorchJobs found or error:', error.message);
+    }
+
+    // 获取RayJob
+    let rayJobs = [];
+    try {
+      const rayOutput = await executeKubectl('get rayjob -o json');
+      const rayResult = JSON.parse(rayOutput);
+      rayJobs = rayResult.items.map(job => ({
+        name: job.metadata.name,
+        namespace: job.metadata.namespace || 'default',
+        creationTimestamp: job.metadata.creationTimestamp,
+        status: job.status || {},
+        type: 'rayjob',
+        spec: {
+          replicas: 1, // RayJob通常是单个作业
+          nprocPerNode: 1
+        }
+      }));
+    } catch (error) {
+      console.log('No RayJobs found or error:', error.message);
+    }
+
+    // 合并两种类型的作业
+    const trainingJobs = [...hyperpodJobs, ...rayJobs];
     
-    console.log(`Found ${trainingJobs.length} training jobs:`, trainingJobs.map(j => j.name));
+    console.log(`Found ${trainingJobs.length} training jobs (${hyperpodJobs.length} HyperPod + ${rayJobs.length} Ray):`, 
+                trainingJobs.map(j => `${j.name}(${j.type})`));
     
     res.json({
       success: true,
@@ -1978,7 +2422,7 @@ app.get('/api/training-jobs/:jobName/pods', async (req, res) => {
 app.get('/api/logs/:jobName/:podName', (req, res) => {
   try {
     const { jobName, podName } = req.params;
-    const logFilePath = path.join(LOG_BASE_DIR, jobName, `${podName}.log`);
+    const logFilePath = path.join(LOGS_BASE_DIR, jobName, `${podName}.log`);
     
     if (fs.existsSync(logFilePath)) {
       res.sendFile(path.resolve(logFilePath));
@@ -2002,7 +2446,7 @@ app.get('/api/logs/:jobName/:podName', (req, res) => {
 app.get('/api/logs/:jobName/:podName/download', (req, res) => {
   try {
     const { jobName, podName } = req.params;
-    const logFilePath = path.join(LOG_BASE_DIR, jobName, `${podName}.log`);
+    const logFilePath = path.join(LOGS_BASE_DIR, jobName, `${podName}.log`);
     
     if (fs.existsSync(logFilePath)) {
       res.download(logFilePath, `${podName}.log`, (err) => {
@@ -2034,7 +2478,7 @@ app.get('/api/logs/:jobName/:podName/download', (req, res) => {
 app.get('/api/logs/:jobName/:podName/info', (req, res) => {
   try {
     const { jobName, podName } = req.params;
-    const logFilePath = path.join(LOG_BASE_DIR, jobName, `${podName}.log`);
+    const logFilePath = path.join(LOGS_BASE_DIR, jobName, `${podName}.log`);
     
     if (fs.existsSync(logFilePath)) {
       const stats = fs.statSync(logFilePath);
@@ -2752,26 +3196,22 @@ function stopLogStream(ws, jobName, podName) {
 function stopAllLogStreams(ws) {
   const streamsToStop = [];
   
-  for (const [streamKey, streamInfo] of activeLogStreams.entries()) {
-    if (streamInfo.ws === ws) {
-      streamsToStop.push(streamKey);
-    }
-  }
-  
-  streamsToStop.forEach(streamKey => {
-    const streamInfo = activeLogStreams.get(streamKey);
-    if (streamInfo) {
-      console.log(`Stopping log stream: ${streamKey}`);
-      streamInfo.process.kill('SIGTERM');
-      
-      // 关闭文件流
-      if (streamInfo.logStream) {
-        streamInfo.logStream.end();
-      }
-      
-      activeLogStreams.delete(streamKey);
+  // 从统一日志流中移除该WebSocket连接
+  unifiedLogStreams.forEach((stream, streamKey) => {
+    if (stream.webSockets.has(ws)) {
+      const [jobName, podName] = streamKey.split('-');
+      streamsToStop.push({ jobName, podName });
     }
   });
+  
+  // 移除WebSocket连接
+  streamsToStop.forEach(({ jobName, podName }) => {
+    removeWebSocketFromLogStream(ws, jobName, podName);
+  });
+  
+  if (streamsToStop.length > 0) {
+    console.log(`🧹 Cleaned up ${streamsToStop.length} log streams for disconnected WebSocket`);
+  }
 }
 
 // 模型下载API

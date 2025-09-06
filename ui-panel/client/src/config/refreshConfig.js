@@ -81,6 +81,13 @@ export const REFRESH_CONFIG = {
         { components: ['all'], delay: 5000 }
       ]
     },
+    'rayjob-delete': {
+      immediate: ['training-monitor', 'training-history', 'status-monitor', 'app-status', 'pods-services'],
+      delayed: [
+        { components: ['cluster-status'], delay: 5000 },
+        { components: ['all'], delay: 10000 }
+      ]
+    },
     'training-delete': {
       immediate: ['training-monitor', 'training-history', 'status-monitor', 'app-status', 'pods-services'],
       delayed: [

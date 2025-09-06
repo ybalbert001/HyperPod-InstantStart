@@ -119,6 +119,17 @@ function App() {
             }
             break;
             
+          case 'rayjob_deleted':
+            // 处理RayJob删除状态
+            if (data.status === 'success') {
+              message.success(data.message);
+              // 🚀 触发操作刷新 - 使用rayjob-delete操作
+              operationRefreshManager.triggerOperationRefresh('rayjob-delete', data);
+            } else {
+              message.error(data.message);
+            }
+            break;
+            
           case 'training_job_deleted':
             // 处理训练任务删除状态
             if (data.status === 'success') {
@@ -370,7 +381,21 @@ function App() {
   const handleTrainingLaunch = async (config) => {
     try {
       console.log('Launching training job with config:', config);
-      const response = await fetch('/api/launch-training', {
+      
+      // 根据recipeType选择不同的API端点
+      let apiEndpoint = '/api/launch-training'; // 默认LlamaFactory
+      
+      if (config.recipeType === 'verl') {
+        apiEndpoint = '/api/launch-verl-training';
+      } else if (config.recipeType === 'torch') {
+        apiEndpoint = '/api/launch-torch-training';
+      } else if (config.recipeType === 'script') {
+        apiEndpoint = '/api/launch-script-training';
+      }
+      
+      console.log(`Using API endpoint: ${apiEndpoint} for recipe type: ${config.recipeType}`);
+      
+      const response = await fetch(apiEndpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -709,6 +734,24 @@ function App() {
                 >
                   <div style={{ padding: '16px' }}>
                     <HyperPodJobManager />
+                  </div>
+                </TabPane>
+                <TabPane 
+                  tab={
+                    <Space>
+                      <RocketOutlined />
+                      RayJobs
+                    </Space>
+                  } 
+                  key="rayjobs"
+                >
+                  <div style={{ padding: '16px' }}>
+                    <StatusMonitor 
+                      pods={[]}
+                      services={[]}
+                      onRefresh={fetchPodsAndServices}
+                      activeTab="rayjobs"
+                    />
                   </div>
                 </TabPane>
               </Tabs>

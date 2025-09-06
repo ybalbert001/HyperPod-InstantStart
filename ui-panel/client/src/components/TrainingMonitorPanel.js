@@ -438,7 +438,7 @@ const TrainingMonitorPanel = () => {
         title: `完整日志 - ${podName}`,
         content: (
           <div style={{ maxHeight: '60vh', overflow: 'auto' }}>
-            <pre style={{ fontSize: '12px', lineHeight: '1.4' }}>
+            <pre style={{ fontSize: '12px', lineHeight: '1.4', whiteSpace: 'pre-wrap', wordWrap: 'break-word' }}>
               {fullLogs}
             </pre>
           </div>
@@ -578,7 +578,7 @@ const TrainingMonitorPanel = () => {
               >
                 [{log.podName}]
               </span>
-              <span style={{ color: log.type === 'error' ? '#ff4d4f' : '#fff' }}>
+              <span style={{ color: log.type === 'error' ? '#ff4d4f' : '#fff', whiteSpace: 'pre-wrap' }}>
                 {log.data}
               </span>
             </div>
