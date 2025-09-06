@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { 
   Form, 
   Input, 
@@ -42,10 +42,9 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
   const [ollamaForm] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('vllm');
-  const [selectedDockerImage, setSelectedDockerImage] = useState('');
 
-  // Docker镜像预设选项
-  const dockerImageOptions = [
+  // Docker镜像预设选项 - 使用useMemo避免重新创建导致焦点丢失
+  const dockerImageOptions = useMemo(() => [
     {
       value: 'vllm/vllm-openai:latest',
       label: 'vllm/vllm-openai:latest'
@@ -58,7 +57,7 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
       value: 'vllm/vllm-openai:gptoss',
       label: 'vllm/vllm-openai:gptoss'
     }
-  ];
+  ], []);
 
   // 根据Docker镜像获取对应的默认命令
   const getDefaultCommandByImage = (dockerImage) => {
@@ -94,11 +93,10 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
   };
 
   // 处理Docker镜像选择变化
-  const handleDockerImageChange = (value) => {
-    setSelectedDockerImage(value);
+  const handleDockerImageChange = useCallback((value) => {
     const newCommand = getDefaultCommandByImage(value);
     vllmForm.setFieldsValue({ vllmCommand: newCommand });
-  };
+  }, [vllmForm]);
 
   // 校验Container Entry命令格式
   const validateVllmCommand = (_, value) => {
@@ -190,8 +188,6 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
     
     return null;
   };
-
-  const defaultVllmCommand = getDefaultCommandByImage(selectedDockerImage || '');
 
   const VLLMForm = () => (
     <Form
@@ -289,7 +285,7 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
       >
         <TextArea
           rows={8}
-          placeholder={selectedDockerImage ? defaultVllmCommand : "请先选择Docker镜像，将自动生成对应的默认命令"}
+          placeholder="请先选择Docker镜像，将自动生成对应的默认命令"
           style={{ fontFamily: 'monospace', fontSize: '12px' }}
         />
       </Form.Item>
