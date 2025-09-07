@@ -141,7 +141,7 @@ function generateNLBAnnotations(isExternal) {
   }
 }
 
-// 解析完整的VLLM/SGLang命令
+// 简化的命令解析函数 - 移除GPU自动解析逻辑
 function parseVllmCommand(vllmCommandString) {
   // 移除换行符和多余空格，处理反斜杠换行
   const cleanCommand = vllmCommandString
@@ -157,57 +157,19 @@ function parseVllmCommand(vllmCommandString) {
     throw new Error('Command cannot be empty');
   }
   
-  // 检查是否为已知的命令格式（用于优化处理，但不强制要求）
+  // 检查是否为已知的命令格式（用于框架识别）
   const isVllmCommand = parts.includes('python3') && parts.includes('-m') && parts.includes('vllm.entrypoints.openai.api_server');
   const isVllmServeCommand = parts.includes('vllm') && parts.includes('serve');
   const isSglangCommand = parts.includes('python3') && parts.includes('-m') && parts.includes('sglang.launch_server');
   
-  let entrypointIndex = -1, tensorParallelSize = 1;
+  let entrypointIndex = -1;
   
   if (isVllmCommand) {
-    // 传统VLLM命令处理: python3 -m vllm.entrypoints.openai.api_server
     entrypointIndex = parts.findIndex(part => part === 'vllm.entrypoints.openai.api_server');
-    const args = parts.slice(entrypointIndex + 1);
-    
-    // 解析tensor-parallel-size用于GPU配置
-    const tensorParallelIndex = args.findIndex(arg => arg === '--tensor-parallel-size');
-    if (tensorParallelIndex !== -1 && tensorParallelIndex + 1 < args.length) {
-      tensorParallelSize = parseInt(args[tensorParallelIndex + 1]) || 1;
-    }
   } else if (isVllmServeCommand) {
-    // 新VLLM serve命令处理: vllm serve /path/to/model
     entrypointIndex = parts.findIndex(part => part === 'serve');
-    const args = parts.slice(entrypointIndex + 1);
-    
-    // 解析tensor-parallel-size用于GPU配置
-    const tensorParallelIndex = args.findIndex(arg => arg === '--tensor-parallel-size');
-    if (tensorParallelIndex !== -1 && tensorParallelIndex + 1 < args.length) {
-      tensorParallelSize = parseInt(args[tensorParallelIndex + 1]) || 1;
-    }
   } else if (isSglangCommand) {
-    // SGLang命令处理
     entrypointIndex = parts.findIndex(part => part === 'sglang.launch_server');
-    const args = parts.slice(entrypointIndex + 1);
-    
-    // 解析tp-size用于GPU配置 (SGLang使用--tp-size而不是--tensor-parallel-size)
-    const tpSizeIndex = args.findIndex(arg => arg === '--tp-size');
-    if (tpSizeIndex !== -1 && tpSizeIndex + 1 < args.length) {
-      tensorParallelSize = parseInt(args[tpSizeIndex + 1]) || 1;
-    }
-  } else {
-    // 对于其他命令格式，尝试通用的GPU参数解析
-    // 查找常见的GPU相关参数
-    const gpuParams = ['--tensor-parallel-size', '--tp-size', '--gpus', '--gpu-count'];
-    for (const param of gpuParams) {
-      const paramIndex = parts.findIndex(arg => arg === param);
-      if (paramIndex !== -1 && paramIndex + 1 < parts.length) {
-        const value = parseInt(parts[paramIndex + 1]);
-        if (!isNaN(value) && value > 0) {
-          tensorParallelSize = value;
-          break;
-        }
-      }
-    }
   }
   
   const args = entrypointIndex >= 0 ? parts.slice(entrypointIndex + 1) : parts.slice(1);
@@ -215,7 +177,6 @@ function parseVllmCommand(vllmCommandString) {
   return {
     fullCommand: parts,
     args: args,
-    tensorParallelSize: tensorParallelSize,
     commandType: (isVllmCommand || isVllmServeCommand) ? 'vllm' : (isSglangCommand ? 'sglang' : 'custom')
   };
 }
@@ -750,12 +711,12 @@ app.post('/api/deploy', async (req, res) => {
               value: "${huggingFaceToken}"`;
       }
       
-      // 替换模板中的占位符
+      // 替换模板中的占位符 - 使用用户指定的GPU数量
       newYamlContent = templateContent
         .replace(/SERVENGINE/g, servEngine)
         .replace(/MODEL_TAG/g, finalDeploymentTag)
         .replace(/REPLICAS_COUNT/g, replicas.toString())
-        .replace(/GPU_COUNT/g, parsedCommand.tensorParallelSize.toString())
+        .replace(/GPU_COUNT/g, gpuCount.toString())
         .replace(/HF_TOKEN_ENV/g, hfTokenEnv)
         .replace(/VLLM_COMMAND/g, JSON.stringify(parsedCommand.fullCommand))
         .replace(/DOCKER_IMAGE/g, dockerImage)

@@ -6,15 +6,12 @@ import {
   Button, 
   Space, 
   Alert,
-  Divider,
   Tooltip,
   Tabs,
-  Collapse,
   Typography,
   Checkbox,
   Row,
   Col,
-  Select,
   AutoComplete
 } from 'antd';
 import { 
@@ -23,18 +20,15 @@ import {
   CheckCircleOutlined,
   ExclamationCircleOutlined,
   CodeOutlined,
-  SettingOutlined,
   ThunderboltOutlined,
   LinkOutlined,
   GlobalOutlined,
-  LockOutlined,
   DockerOutlined,
   TagOutlined
 } from '@ant-design/icons';
 
 const { TextArea } = Input;
 const { TabPane } = Tabs;
-const { Panel } = Collapse;
 const { Link } = Typography;
 
 const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
@@ -196,6 +190,7 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
       onFinish={handleSubmit}
       initialValues={{
         replicas: 1,
+        gpuCount: 1,
         isExternal: true,
         deploymentName: '',
         dockerImage: '', // 改为空，用户必须选择
@@ -225,27 +220,55 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
         />
       </Form.Item>
 
-      <Form.Item
-        label={
-          <Space>
-            <TagOutlined />
-            Deployment Name
-            <Tooltip title="用于Kubernetes资源命名的标识符">
-              <InfoCircleOutlined />
-            </Tooltip>
-          </Space>
-        }
-        name="deploymentName"
-        rules={[
-          { required: true, message: 'Please input deployment name!' },
-          { pattern: /^[a-z0-9-]+$/, message: 'Only lowercase letters, numbers and hyphens allowed' }
-        ]}
-      >
-        <Input 
-          placeholder="e.g., qwen3-chat, llama2-7b"
-          style={{ fontFamily: 'monospace' }}
-        />
-      </Form.Item>
+      <Row gutter={16}>
+        <Col span={12}>
+          <Form.Item
+            label={
+              <Space>
+                <TagOutlined />
+                Deployment Name
+                <Tooltip title="用于Kubernetes资源命名的标识符">
+                  <InfoCircleOutlined />
+                </Tooltip>
+              </Space>
+            }
+            name="deploymentName"
+            rules={[
+              { required: true, message: 'Please input deployment name!' },
+              { pattern: /^[a-z0-9-]+$/, message: 'Only lowercase letters, numbers and hyphens allowed' }
+            ]}
+          >
+            <Input 
+              placeholder="e.g., qwen3-chat, llama2-7b"
+              style={{ fontFamily: 'monospace' }}
+            />
+          </Form.Item>
+        </Col>
+        <Col span={12}>
+          <Form.Item
+            label={
+              <Space>
+                GPU Count (per replica)
+                <Tooltip title="Number of GPUs allocated per replica">
+                  <InfoCircleOutlined />
+                </Tooltip>
+              </Space>
+            }
+            name="gpuCount"
+            rules={[
+              { required: true, message: 'Please input GPU count!' },
+              { type: 'number', min: 1, max: 8, message: 'GPU count must be between 1 and 8' }
+            ]}
+          >
+            <InputNumber 
+              min={1} 
+              max={8} 
+              style={{ width: '100%' }}
+              placeholder="Number of GPUs per replica"
+            />
+          </Form.Item>
+        </Col>
+      </Row>
 
       <Form.Item
         label={
@@ -296,8 +319,8 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
         </div>
         <div style={{ fontSize: '11px', color: '#0c4a6e' }}>
           • 支持任意EntryPoint及参数，如python3 -m project.main --model HuggingfaceID<br/>
-          • 系统会尝试从命令中提取模型信息，部署名称将基于提取的模型ID<br/>
           • 支持vLLM、SGLang及任意自定义容器<br/>
+          • 每个模型副本/Replica的GPU数量需要与参数中的数量一致，如tp/pp等参数<br/>
           • 确保命令在容器环境中可执行
         </div>
       </div>

@@ -203,6 +203,8 @@ Resources:
           chmod 700 get_helm.sh
           ./get_helm.sh
           rm get_helm.sh
+
+          curl -LsSf https://astral.sh/uv/install.sh | sh
           
           # Install Session Manager Plugin
           echo "Installing Session Manager Plugin..."
