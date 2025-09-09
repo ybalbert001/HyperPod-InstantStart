@@ -4043,6 +4043,10 @@ app.get('/api/multi-cluster/list', (req, res) => multiClusterAPIs.handleGetClust
 app.post('/api/multi-cluster/switch', (req, res) => multiClusterAPIs.handleSwitchCluster(req, res));
 app.post('/api/multi-cluster/switch-kubectl', (req, res) => multiClusterAPIs.handleSwitchKubectlConfig(req, res));
 
+// 集群导入API
+app.post('/api/cluster/import', (req, res) => multiClusterAPIs.handleImportCluster(req, res));
+app.post('/api/cluster/test-connection', (req, res) => multiClusterAPIs.handleTestConnection(req, res));
+
 // 重写现有的集群API以支持多集群
 app.post('/api/cluster/save-config', (req, res) => multiClusterAPIs.handleSaveConfig(req, res));
 app.post('/api/cluster/launch', (req, res) => multiClusterAPIs.handleLaunch(req, res));

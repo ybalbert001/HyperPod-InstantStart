@@ -19,7 +19,7 @@ Parameters:
     
   KeyPairName:
     Type: String
-    Default: pdxkeypair
+    Default: yourkeypair
     Description: Name of the EC2 KeyPair for SSH access
     
   EBSVolumeSize:

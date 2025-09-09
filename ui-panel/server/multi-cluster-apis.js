@@ -595,6 +595,150 @@ class MultiClusterAPIs {
     }
   }
 
+  // 导入现有集群
+  async handleImportCluster(req, res) {
+    try {
+      const { eksClusterName, awsRegion, s3BucketName } = req.body;
+      
+      if (!eksClusterName || !awsRegion || !s3BucketName) {
+        return res.status(400).json({
+          success: false,
+          error: 'eksClusterName, awsRegion, and s3BucketName are required'
+        });
+      }
+
+      console.log(`Importing existing cluster: ${eksClusterName} in ${awsRegion}`);
+
+      // 1. 测试连接
+      const connectionTest = await this.testConnection(eksClusterName, awsRegion);
+      if (!connectionTest.success) {
+        return res.status(400).json({
+          success: false,
+          error: `Connection test failed: ${connectionTest.error}`
+        });
+      }
+
+      // 2. 创建集群目录结构
+      this.clusterManager.createClusterDirs(eksClusterName);
+      
+      // 3. 生成导入配置
+      const importConfig = {
+        CLUSTER_TYPE: 'imported',
+        EKS_CLUSTER_NAME: eksClusterName,
+        AWS_REGION: awsRegion,
+        S3_BUCKET_NAME: s3BucketName,
+        SKIP_CLUSTER_CREATION: 'true',
+        SKIP_CLOUDFORMATION: 'true'
+      };
+      
+      await this.clusterManager.saveImportConfig(eksClusterName, importConfig);
+      
+      // 4. 设置为活跃集群
+      this.clusterManager.setActiveCluster(eksClusterName);
+      
+      // 5. 更新kubectl配置
+      await this.switchKubectlConfig(eksClusterName);
+      
+      res.json({
+        success: true,
+        message: `Successfully imported cluster: ${eksClusterName}`,
+        clusterTag: eksClusterName,
+        nodeCount: connectionTest.nodeCount
+      });
+
+    } catch (error) {
+      console.error('Error importing cluster:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  }
+
+  // 测试集群连接
+  async handleTestConnection(req, res) {
+    try {
+      const { eksClusterName, awsRegion } = req.body;
+      
+      if (!eksClusterName || !awsRegion) {
+        return res.status(400).json({
+          success: false,
+          error: 'eksClusterName and awsRegion are required'
+        });
+      }
+
+      const result = await this.testConnection(eksClusterName, awsRegion);
+      res.json(result);
+
+    } catch (error) {
+      console.error('Error testing connection:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  }
+
+  // 测试连接的内部方法
+  async testConnection(eksClusterName, awsRegion) {
+    return new Promise((resolve) => {
+      // 1. 测试EKS集群是否存在
+      exec(`aws eks describe-cluster --region ${awsRegion} --name ${eksClusterName}`, (error, stdout) => {
+        if (error) {
+          resolve({
+            success: false,
+            error: `EKS cluster not found or access denied: ${error.message}`
+          });
+          return;
+        }
+
+        // 2. 保存当前kubectl配置
+        exec('kubectl config current-context', (contextError, currentContext) => {
+          const originalContext = currentContext ? currentContext.trim() : null;
+          
+          // 3. 临时更新kubectl配置进行测试
+          exec(`aws eks update-kubeconfig --region ${awsRegion} --name ${eksClusterName}`, (kubectlError) => {
+            if (kubectlError) {
+              resolve({
+                success: false,
+                error: `Failed to update kubectl config: ${kubectlError.message}`
+              });
+              return;
+            }
+
+            // 4. 测试kubectl连接
+            exec('kubectl get nodes --no-headers | wc -l', (nodeError, nodeStdout) => {
+              const nodeCount = nodeError ? 0 : parseInt(nodeStdout.trim()) || 0;
+              
+              // 5. 恢复原来的kubectl配置（如果有的话）
+              if (originalContext && originalContext !== 'error') {
+                exec(`kubectl config use-context ${originalContext}`, (restoreError) => {
+                  if (restoreError) {
+                    console.warn('Failed to restore original kubectl context:', restoreError.message);
+                  }
+                });
+              }
+
+              if (nodeError) {
+                resolve({
+                  success: false,
+                  error: `Failed to connect to cluster: ${nodeError.message}`
+                });
+              } else {
+                resolve({
+                  success: true,
+                  nodeCount,
+                  message: `Successfully connected to cluster with ${nodeCount} nodes`,
+                  warning: originalContext ? 'Kubectl context restored to original' : 'No original context to restore'
+                });
+              }
+            });
+          });
+        });
+      });
+    });
+  }
+
   // 清除状态缓存 - 支持多集群
   async handleClearStatusCache(req, res) {
     try {

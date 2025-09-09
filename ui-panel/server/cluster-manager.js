@@ -197,6 +197,60 @@ class ClusterManager {
     });
   }
 
+  // 保存导入集群配置
+  async saveImportConfig(clusterTag, importConfig) {
+    const configDir = this.getClusterConfigDir(clusterTag);
+    const initEnvsPath = path.join(configDir, 'init_envs');
+    
+    // 生成init_envs内容
+    let content = '#!/bin/bash\n\n';
+    content += '# Imported cluster configuration\n';
+    
+    Object.entries(importConfig).forEach(([key, value]) => {
+      content += `export ${key}="${value}"\n`;
+    });
+    
+    fs.writeFileSync(initEnvsPath, content);
+    console.log(`Saved import config for cluster: ${clusterTag}`);
+    
+    // 创建导入元数据
+    const metadataDir = this.getClusterMetadataDir(clusterTag);
+    const importMetadata = {
+      type: 'imported',
+      importedAt: new Date().toISOString(),
+      eksClusterName: importConfig.EKS_CLUSTER_NAME,
+      awsRegion: importConfig.AWS_REGION,
+      s3BucketName: importConfig.S3_BUCKET_NAME
+    };
+    
+    fs.writeFileSync(
+      path.join(metadataDir, 'import_metadata.json'),
+      JSON.stringify(importMetadata, null, 2)
+    );
+    
+    // 创建cluster_info.json以便在集群列表中显示
+    const clusterInfo = {
+      clusterTag,
+      status: 'imported',
+      lastModified: new Date().toISOString(),
+      config: {
+        clusterTag,
+        awsRegion: importConfig.AWS_REGION,
+        eksClusterName: importConfig.EKS_CLUSTER_NAME,
+        s3BucketName: importConfig.S3_BUCKET_NAME,
+        clusterType: 'imported'
+      },
+      type: 'imported'
+    };
+    
+    fs.writeFileSync(
+      path.join(metadataDir, 'cluster_info.json'),
+      JSON.stringify(clusterInfo, null, 2)
+    );
+    
+    console.log(`Created cluster info for imported cluster: ${clusterTag}`);
+  }
+
   // 检查集群是否存在
   clusterExists(clusterTag) {
     return fs.existsSync(this.getClusterDir(clusterTag));
