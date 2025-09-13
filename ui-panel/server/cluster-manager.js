@@ -219,8 +219,7 @@ class ClusterManager {
       type: 'imported',
       importedAt: new Date().toISOString(),
       eksClusterName: importConfig.EKS_CLUSTER_NAME,
-      awsRegion: importConfig.AWS_REGION,
-      s3BucketName: importConfig.S3_BUCKET_NAME
+      awsRegion: importConfig.AWS_REGION
     };
     
     fs.writeFileSync(
@@ -237,7 +236,6 @@ class ClusterManager {
         clusterTag,
         awsRegion: importConfig.AWS_REGION,
         eksClusterName: importConfig.EKS_CLUSTER_NAME,
-        s3BucketName: importConfig.S3_BUCKET_NAME,
         clusterType: 'imported'
       },
       type: 'imported'

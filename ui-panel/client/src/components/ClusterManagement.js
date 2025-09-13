@@ -825,69 +825,68 @@ const ClusterManagement = () => {
                           
                           if (cluster.type === 'imported') {
                             return (
-                              <Row gutter={[16, 16]}>
-                                <Col span={12}>
-                                  <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                              <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                                <Row gutter={[16, 16]}>
+                                  <Col span={12}>
                                     <div>
                                       <Text strong>EKS Cluster Name:</Text>
                                       <br />
                                       <Text code>{cluster.config?.eksClusterName || 'N/A'}</Text>
                                     </div>
+                                  </Col>
+                                  <Col span={12}>
                                     <div>
                                       <Text strong>AWS Region:</Text>
                                       <br />
                                       <Text code>{cluster.config?.awsRegion || 'N/A'}</Text>
                                     </div>
+                                  </Col>
+                                </Row>
+                                <div>
+                                  <Text strong>Tags:</Text>
+                                  <br />
+                                  <Space>
+                                    <Tag color="blue">Imported</Tag>
                                   </Space>
-                                </Col>
-                                <Col span={12}>
-                                  <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                                    <div>
-                                      <Text strong>S3 Bucket:</Text>
-                                      <br />
-                                      <Text code>{cluster.config?.s3BucketName || 'N/A'}</Text>
-                                    </div>
-                                    <div>
-                                      <Text strong>Cluster Type:</Text>
-                                      <br />
-                                      <Tag color="blue">Imported</Tag>
-                                    </div>
-                                  </Space>
-                                </Col>
-                              </Row>
+                                </div>
+                              </Space>
                             );
                           } else {
                             return (
-                              <Row gutter={[16, 16]}>
-                                <Col span={12}>
-                                  <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                              <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                                <Row gutter={[16, 16]}>
+                                  <Col span={12}>
                                     <div>
                                       <Text strong>Cluster Tag:</Text>
                                       <br />
                                       <Text code>{cluster.config?.clusterTag || 'N/A'}</Text>
                                     </div>
+                                  </Col>
+                                  <Col span={12}>
                                     <div>
                                       <Text strong>AWS Region:</Text>
                                       <br />
                                       <Text code>{cluster.config?.awsRegion || 'N/A'}</Text>
                                     </div>
-                                  </Space>
-                                </Col>
-                                <Col span={12}>
-                                  <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                                  </Col>
+                                </Row>
+                                <Row gutter={[16, 16]}>
+                                  <Col span={12}>
                                     <div>
                                       <Text strong>GPU Instance Type:</Text>
                                       <br />
                                       <Text code>{cluster.config?.gpuInstanceType || 'N/A'}</Text>
                                     </div>
-                                    <div>
-                                      <Text strong>Cluster Type:</Text>
-                                      <br />
-                                      <Tag color="green">Created</Tag>
-                                    </div>
+                                  </Col>
+                                </Row>
+                                <div>
+                                  <Text strong>Tags:</Text>
+                                  <br />
+                                  <Space>
+                                    <Tag color="green">Created</Tag>
                                   </Space>
-                                </Col>
-                              </Row>
+                                </div>
+                              </Space>
                             );
                           }
                         })()}
@@ -1446,15 +1445,6 @@ const ClusterManagement = () => {
           extra="The AWS region where your EKS cluster is located"
         >
           <Input placeholder="us-west-2" />
-        </Form.Item>
-
-        <Form.Item
-          label="S3 Bucket for Models"
-          name="s3BucketName"
-          rules={[{ required: true, message: 'Please enter S3 bucket name' }]}
-          extra="S3 bucket for storing and downloading models"
-        >
-          <Input placeholder="my-models-bucket" />
         </Form.Item>
 
         <Divider />

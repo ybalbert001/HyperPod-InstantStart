@@ -1,21 +1,16 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'CloudFormation template for EKS SMHP setup with timestamped names and automated dependency installation'
+Description: 'Simplified CloudFormation template for EKS HYPD setup'
 
 Parameters:
   InstanceName:
     Type: String
-    Default: eks-smhp-dev-instance
+    Default: eks-hypd-dev-instance
     Description: Name for the EC2 instance
     
   InstanceType:
     Type: String
     Default: m5.xlarge
     Description: EC2 instance type (e.g., c5.xlarge, m5.xlarge, t3.large)
-    
-  AmiId:
-    Type: String
-    Default: ami-05f991c49d264708f
-    Description: AMI ID for the EC2 instance
     
   KeyPairName:
     Type: String
@@ -46,8 +41,13 @@ Parameters:
     
   ResourceTag:
     Type: String
-    Default: smhp-dev
-    Description: Resource tag prefix for naming resources (e.g., smhp-dev, eks-prod)
+    Default: hypd-dev
+    Description: Resource tag prefix for naming resources (e.g., hypd-dev, eks-prod)
+    
+  LatestUbuntu2204AMI:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id
+    Description: Latest Ubuntu 22.04 LTS AMI ID
 
 Conditions:
   HasVpcId: !Not [!Equals [!Ref VpcId, ""]]
@@ -60,8 +60,28 @@ Conditions:
   UseDefaultVpc: !Not [!Condition UseCustomVpc]
 
 Resources:
-  # IAM Role with timestamped name
-  SMHPAdminRole:
+  # S3 Bucket for HYPD resources
+  HYPDUserBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ResourceTag}-s3-${AWS::Region}'
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ResourceTag}-bucket'
+
+  # IAM Role
+  EKSPlusHYPDAdminRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub '${ResourceTag}-admin-role'
@@ -86,15 +106,15 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AdministratorAccess
 
-  # Instance Profile for the IAM Role
-  SMHPInstanceProfile:
+  # Instance Profile
+  HYPDInstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
-      InstanceProfileName: !Sub 'instance-profile-${SMHPAdminRole}'
+      InstanceProfileName: !Sub 'instance-profile-${EKSPlusHYPDAdminRole}'
       Roles:
-        - !Ref SMHPAdminRole
+        - !Ref EKSPlusHYPDAdminRole
 
-  # Security Group with timestamped name (only created for default VPC)
+  # Security Group (only for default VPC)
   SecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Condition: UseDefaultVpc
@@ -111,14 +131,17 @@ Resources:
           ToPort: 3099
           CidrIp: 0.0.0.0/0
 
-  # EC2 Instance with IAM Role attached, custom EBS volume, and UserData for dependency installation
+  # EC2 Instance
   EC2Instance:
     Type: AWS::EC2::Instance
+    DependsOn: 
+      - HYPDUserBucket
+      - HYPDInstanceProfile
     Properties:
-      ImageId: !Ref AmiId
+      ImageId: !Ref LatestUbuntu2204AMI
       InstanceType: !Ref InstanceType
       KeyName: !Ref KeyPairName
-      IamInstanceProfile: !Ref SMHPInstanceProfile
+      IamInstanceProfile: !Ref HYPDInstanceProfile
       SecurityGroupIds: !If [UseCustomVpc, !Ref "AWS::NoValue", [!Ref SecurityGroup]]
       NetworkInterfaces: !If 
         - UseCustomVpc
@@ -138,123 +161,84 @@ Resources:
         Fn::Base64: !Sub |
           #!/bin/bash
           
-          # Create log file for installation progress
+          # Create log file
           LOG_FILE="/var/log/dependency-install.log"
           exec > >(tee -a $LOG_FILE)
           exec 2>&1
           
           echo "Starting dependency installation at $(date)"
           
-          # Update system and install basic dependencies
-          sudo apt-get update -y
-          sudo apt-get install -y zip unzip curl wget python3-pip docker.io
-
+          apt-get update -y
+          apt-get install -y zip unzip curl wget python3-pip docker.io s3fs
+          
           systemctl start docker
           systemctl enable docker
           usermod -aG docker ubuntu
           chmod 666 /var/run/docker.sock
           
-          # Install CloudFormation helper scripts FIRST
-          echo "Installing CloudFormation helper scripts..."
           pip3 install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
           
-          # Create symlinks for cfn-signal
-          ln -sf /usr/local/bin/cfn-signal /opt/aws/bin/cfn-signal 2>/dev/null || true
-          mkdir -p /opt/aws/bin
-          ln -sf /usr/local/bin/cfn-signal /opt/aws/bin/cfn-signal 2>/dev/null || true
-          
-          # Install AWS CLI v2
-          echo "Installing AWS CLI v2..."
           curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
           unzip awscliv2.zip
           ./aws/install --update
           rm -rf awscliv2.zip aws/
           
-          # Verify AWS CLI installation
-          # aws --version
           sudo -u ubuntu aws configure set region ${AWS::Region}
           sudo -u ubuntu aws configure set output json
           
-          # Install kubectl
-          echo "Installing kubectl..."
           curl -O https://s3.us-west-2.amazonaws.com/amazon-eks/1.30.4/2024-09-11/bin/linux/amd64/kubectl
           chmod +x ./kubectl
           mv ./kubectl /usr/local/bin/
           
-          # # Update PATH for ubuntu user
-          # echo 'export PATH=$HOME/bin:$PATH' >> /home/ubuntu/.bashrc
-          # chown ubuntu:ubuntu /home/ubuntu/bin/kubectl
-          # chown ubuntu:ubuntu /home/ubuntu/.bashrc
-          
-          # Install eksctl (skip checksum verification to avoid failures)
-          echo "Installing eksctl..."
           ARCH=amd64
           PLATFORM=$(uname -s)_$ARCH
           curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$PLATFORM.tar.gz"
-          
-          # Skip checksum verification to avoid potential failures
           tar -xzf eksctl_$PLATFORM.tar.gz -C /tmp
           rm eksctl_$PLATFORM.tar.gz
           mv /tmp/eksctl /usr/local/bin
           
-          # Install Helm
-          echo "Installing Helm..."
           curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
           chmod 700 get_helm.sh
           ./get_helm.sh
           rm get_helm.sh
-
-          curl -LsSf https://astral.sh/uv/install.sh | sh
           
-          # Install Session Manager Plugin
-          echo "Installing Session Manager Plugin..."
+          # curl -LsSf https://astral.sh/uv/install.sh | sh
+          sudo -u ubuntu curl -LsSf https://astral.sh/uv/install.sh | sudo -u ubuntu sh
+          echo 'export PATH="$HOME/.local/bin:$PATH"' >> /home/ubuntu/.bashrc
+          chown ubuntu:ubuntu /home/ubuntu/.bashrc
+          
           curl "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb" -o "session-manager-plugin.deb"
           dpkg -i session-manager-plugin.deb
           rm session-manager-plugin.deb
           
-          # Verify installations
-          echo "Verifying installations..."
+          mkdir -p /home/ubuntu/workspace/s3
+          chown -R ubuntu:ubuntu /home/ubuntu/workspace
           
-          # aws --version
-          # kubectl version --client
-          # eksctl version
-          # helm version
-          # session-manager-plugin
+          # Configure fuse for allow_other
+          echo "user_allow_other" >> /etc/fuse.conf
           
-          # Set proper ownership for ubuntu user home directory
+          # S3_BUCKET_NAME="${ResourceTag}-bucket-${AWS::AccountId}-${AWS::Region}"
+          S3_BUCKET_NAME="${ResourceTag}-s3-${AWS::Region}"
+          
+          # Add to fstab for persistent mounting
+          echo "$S3_BUCKET_NAME /home/ubuntu/workspace/s3 fuse.s3fs _netdev,iam_role=${EKSPlusHYPDAdminRole},allow_other,uid=1000,gid=1000 0 0" >> /etc/fstab
+          
+          sudo -u ubuntu s3fs $S3_BUCKET_NAME /home/ubuntu/workspace/s3 -o iam_role=${EKSPlusHYPDAdminRole}
+          
+          sudo -u ubuntu touch /home/ubuntu/workspace/s3/$S3_BUCKET_NAME.txt
+          
           chown -R ubuntu:ubuntu /home/ubuntu/
           
-          echo "Dependency installation completed at $(date)"
+          echo "Installation completed at $(date)"
           
-          # Signal CloudFormation that the instance is ready
-          # Get instance ID using IMDSv2
-          TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" 2>/dev/null)
-          INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" -s http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null)
-          
-          # Try multiple methods to ensure signal is sent
-          if command -v cfn-signal >/dev/null 2>&1; then
-            cfn-signal -e $? --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}
-          elif [ -f /usr/local/bin/cfn-signal ]; then
-            /usr/local/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}
-          elif [ -f /opt/aws/bin/cfn-signal ]; then
-            /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}
-          else
-            echo "cfn-signal not found, using AWS CLI to send signal"
-            # Fallback: use AWS CLI to send signal
-            if [ -n "$INSTANCE_ID" ]; then
-              aws cloudformation signal-resource --stack-name ${AWS::StackName} --logical-resource-id EC2Instance --unique-id $INSTANCE_ID --status SUCCESS --region ${AWS::Region}
-            else
-              echo "Failed to get instance ID, trying without unique-id"
-              aws cloudformation signal-resource --stack-name ${AWS::StackName} --logical-resource-id EC2Instance --status SUCCESS --region ${AWS::Region}
-            fi
-          fi
+          /usr/local/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}
       Tags:
         - Key: Name
           Value: !Sub '${ResourceTag}-instance'
     CreationPolicy:
       ResourceSignal:
         Count: 1
-        Timeout: PT15M  # 5 minutes for fast failure
+        Timeout: PT15M
 
 Outputs:
   InstanceId:
@@ -263,17 +247,23 @@ Outputs:
   InstancePublicIP:
     Value: !GetAtt EC2Instance.PublicIp
     Description: Public IP address of the EC2 instance
+  S3BucketName:
+    Value: !Ref HYPDUserBucket
+    Description: Name of the created S3 bucket
+  S3BucketArn:
+    Value: !GetAtt HYPDUserBucket.Arn
+    Description: ARN of the created S3 bucket
   IAMRoleName:
-    Value: !Ref SMHPAdminRole
+    Value: !Ref EKSPlusHYPDAdminRole
     Description: Name of the IAM role
   IAMRoleArn:
-    Value: !GetAtt SMHPAdminRole.Arn
+    Value: !GetAtt EKSPlusHYPDAdminRole.Arn
     Description: ARN of the IAM role
   InstanceProfileName:
-    Value: !Ref SMHPInstanceProfile
+    Value: !Ref HYPDInstanceProfile
     Description: Name of the Instance Profile
   InstanceProfileArn:
-    Value: !GetAtt SMHPInstanceProfile.Arn
+    Value: !GetAtt HYPDInstanceProfile.Arn
     Description: ARN of the Instance Profile
   SecurityGroupId:
     Condition: UseDefaultVpc

@@ -58,6 +58,30 @@ function broadcast(data) {
   });
 }
 
+// 优化错误消息的函数
+function optimizeErrorMessage(errorMessage) {
+  if (!errorMessage) return 'Unknown error';
+  
+  // 如果是获取hyperpodpytorchjob但资源类型不存在，这是正常情况
+  if (errorMessage.includes(`doesn't have a resource type "hyperpodpytorchjob"`)) {
+    return 'No HyperPod training jobs found (HyperPod operator may not be installed)';
+  }
+  // 如果是获取rayjob但资源类型不存在
+  if (errorMessage.includes(`doesn't have a resource type "rayjob"`)) {
+    return 'No RayJobs found (Ray operator may not be installed)';
+  }
+  // 如果是资源不存在，使用更友好的消息
+  if (errorMessage.includes('not found') || errorMessage.includes('NotFound')) {
+    return 'Resource not found - this may be normal if no resources have been created yet';
+  }
+  // 如果是连接问题
+  if (errorMessage.includes('connection refused') || errorMessage.includes('unable to connect')) {
+    return 'Unable to connect to Kubernetes cluster. Please check if the cluster is accessible.';
+  }
+  
+  return errorMessage;
+}
+
 // 执行kubectl命令的辅助函数 - 简化版错误优化
 function executeKubectl(command, timeout = 30000) { // 默认30秒超时
   return new Promise((resolve, reject) => {
@@ -1797,7 +1821,9 @@ app.get('/api/training-jobs', async (req, res) => {
         }
       }));
     } catch (error) {
-      console.log('No HyperPod PytorchJobs found or error:', error.message);
+      const optimizedMessage = optimizeErrorMessage(error.message);
+      console.log('No HyperPod PytorchJobs found or error:', optimizedMessage);
+      // 对于导入的集群，这是正常的 - 不记录为错误
     }
 
     // 获取RayJob
@@ -1817,7 +1843,9 @@ app.get('/api/training-jobs', async (req, res) => {
         }
       }));
     } catch (error) {
-      console.log('No RayJobs found or error:', error.message);
+      const optimizedMessage = optimizeErrorMessage(error.message);
+      console.log('No RayJobs found or error:', optimizedMessage);
+      // 对于导入的集群，这是正常的 - 不记录为错误
     }
 
     // 合并两种类型的作业
@@ -2028,7 +2056,7 @@ except Exception as e:
     
     fs.writeFileSync(tempScriptPath, testScript);
     
-    const pythonPath = path.join(__dirname, '../.venv/bin/python');
+    const pythonPath = 'python3'; // 使用系统Python
     const pythonProcess = spawn(pythonPath, [tempScriptPath], {
       cwd: __dirname,
       env: { ...process.env }
@@ -2173,7 +2201,7 @@ app.post('/api/mlflow-sync', async (req, res) => {
 
     // 3. 调用Python同步脚本
     const { spawn } = require('child_process');
-    const pythonPath = path.join(__dirname, '../.venv/bin/python');
+    const pythonPath = 'python3'; // 使用系统Python
     const syncScriptPath = path.join(__dirname, '../mlflow/cross_account_sync.py');
     
     const pythonProcess = spawn(pythonPath, [
@@ -2266,8 +2294,8 @@ app.get('/api/training-history', async (req, res) => {
     const { spawn } = require('child_process');
     const path = require('path');
     
-    // 使用项目内虚拟环境的Python执行脚本，传递配置参数
-    const pythonPath = path.join(__dirname, '../.venv/bin/python');
+    // 使用系统Python执行脚本，传递配置参数
+    const pythonPath = 'python3'; // 使用系统Python
     const scriptPath = path.join(__dirname, '../mlflow/get_training_history.py');
     
     const pythonProcess = spawn(pythonPath, [scriptPath, mlflowConfig.tracking_uri], {
@@ -2286,13 +2314,18 @@ app.get('/api/training-history', async (req, res) => {
       stderr += data.toString();
     });
     
+    let responseHandled = false;
+    
     pythonProcess.on('close', (code) => {
+      if (responseHandled) return;
+      
       if (stderr) {
         console.log('Python script stderr:', stderr);
       }
       
       if (code !== 0) {
         console.error(`Python script exited with code ${code}`);
+        responseHandled = true;
         return res.status(500).json({ 
           success: false, 
           error: `Failed to fetch training history: exit code ${code}`,
@@ -2303,10 +2336,12 @@ app.get('/api/training-history', async (req, res) => {
       try {
         const result = JSON.parse(stdout);
         console.log(`Training history fetched: ${result.total} records`);
+        responseHandled = true;
         res.json(result);
       } catch (parseError) {
         console.error('Failed to parse Python script output:', parseError);
         console.error('Raw output:', stdout);
+        responseHandled = true;
         res.status(500).json({ 
           success: false, 
           error: 'Failed to parse training history data',
@@ -2316,7 +2351,10 @@ app.get('/api/training-history', async (req, res) => {
     });
     
     pythonProcess.on('error', (error) => {
+      if (responseHandled) return;
+      
       console.error('Failed to start Python script:', error);
+      responseHandled = true;
       res.status(500).json({ 
         success: false, 
         error: `Failed to start Python script: ${error.message}`
@@ -3175,6 +3213,115 @@ function stopAllLogStreams(ws) {
   }
 }
 
+const S3StorageManager = require('./s3-storage-manager');
+const s3StorageManager = new S3StorageManager();
+
+// S3存储管理API
+app.get('/api/s3-storages', async (req, res) => {
+  const result = await s3StorageManager.getStorages();
+  res.json(result);
+});
+
+app.post('/api/s3-storages', async (req, res) => {
+  const result = await s3StorageManager.createStorage(req.body);
+  if (result.success) {
+    broadcast({
+      type: 's3_storage_created',
+      status: 'success',
+      message: `S3 storage ${req.body.name} created successfully`
+    });
+  }
+  res.json(result);
+});
+
+app.delete('/api/s3-storages/:name', async (req, res) => {
+  const result = await s3StorageManager.deleteStorage(req.params.name);
+  if (result.success) {
+    broadcast({
+      type: 's3_storage_deleted',
+      status: 'success',
+      message: `S3 storage ${req.params.name} deleted successfully`
+    });
+  }
+  res.json(result);
+});
+
+// 增强的模型下载API
+app.post('/api/download-model-enhanced', async (req, res) => {
+  try {
+    const { modelId, hfToken, resources, s3Storage } = req.body;
+    
+    if (!modelId) {
+      return res.json({ success: false, error: 'Model ID is required' });
+    }
+
+    console.log(`🚀 Starting enhanced model download: ${modelId}`);
+    console.log(`📊 Resources: CPU=${resources.cpu}, Memory=${resources.memory}GB`);
+    console.log(`💾 S3 Storage: ${s3Storage}`);
+
+    // 生成增强的下载Job
+    const jobResult = await s3StorageManager.generateEnhancedDownloadJob({
+      modelId,
+      hfToken,
+      resources,
+      s3Storage
+    });
+
+    if (!jobResult.success) {
+      return res.json({ success: false, error: jobResult.error });
+    }
+
+    // 确保deployments目录存在
+    const deploymentsDir = path.join(__dirname, '..', 'deployments');
+    await fs.ensureDir(deploymentsDir);
+    
+    // 保存生成的YAML文件到deployments目录
+    const modelTag = modelId.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const deploymentFile = path.join(deploymentsDir, `enhanced-model-download-${modelTag}-${timestamp}.yaml`);
+    await fs.writeFile(deploymentFile, jobResult.yamlContent);
+    
+    console.log(`📁 Saved deployment template: ${deploymentFile}`);
+
+    // 应用Job到Kubernetes
+    const tempFile = `/tmp/enhanced-download-job-${Date.now()}.yaml`;
+    fs.writeFileSync(tempFile, jobResult.yamlContent);
+
+    exec(`kubectl apply -f ${tempFile}`, (error, stdout, stderr) => {
+      fs.removeSync(tempFile);
+      
+      if (error) {
+        console.error('❌ Failed to create enhanced download job:', stderr);
+        broadcast({
+          type: 'model_download',
+          status: 'error',
+          message: `Failed to start enhanced model download: ${stderr}`
+        });
+        return res.json({ success: false, error: stderr });
+      }
+
+      console.log('✅ Enhanced model download job created successfully');
+      broadcast({
+        type: 'model_download',
+        status: 'success',
+        message: `Enhanced model download started: ${modelId}`,
+        jobName: jobResult.jobName
+      });
+
+      res.json({ 
+        success: true, 
+        message: 'Enhanced model download job created successfully',
+        jobName: jobResult.jobName,
+        deploymentFile: path.basename(deploymentFile)
+      });
+    });
+
+  } catch (error) {
+    console.error('❌ Error in enhanced model download:', error);
+    res.json({ success: false, error: error.message });
+  }
+});
+
 // 模型下载API
 app.post('/api/download-model', async (req, res) => {
   try {
@@ -3266,592 +3413,109 @@ app.post('/api/download-model', async (req, res) => {
 // S3存储信息API - 从s3-pv PersistentVolume获取桶信息
 app.get('/api/s3-storage', async (req, res) => {
   try {
-    console.log('Fetching S3 storage information from s3-pv...');
+    const { storage } = req.query;
+    console.log(`📦 Fetching S3 storage content for: ${storage || 'default'}`);
     
-    let bucketName = null;
-    let bucketInfo = null;
-    let region = null;
+    // 获取存储配置
+    const storageResult = await s3StorageManager.getStorages();
+    if (!storageResult.success) {
+      return res.json({ success: false, error: 'Failed to get storage configurations' });
+    }
     
-    try {
-      // 直接从s3-pv PersistentVolume获取S3桶信息
-      const pvResult = await executeKubectl('get pv s3-pv -o json');
-      const pvData = JSON.parse(pvResult);
-      
-      console.log('PV data retrieved:', JSON.stringify(pvData, null, 2));
-      
-      // 从PV的spec.csi.volumeAttributes中提取S3桶信息
-      if (pvData.spec && pvData.spec.csi && pvData.spec.csi.volumeAttributes) {
-        const volumeAttributes = pvData.spec.csi.volumeAttributes;
-        
-        // 常见的S3 CSI驱动器属性名称
-        bucketName = volumeAttributes.bucketName || 
-                    volumeAttributes.bucket || 
-                    volumeAttributes['s3.bucket'] ||
-                    volumeAttributes['csi.storage.k8s.io/bucket'];
-        
-        region = volumeAttributes.region || 
-                volumeAttributes['s3.region'] ||
-                volumeAttributes['csi.storage.k8s.io/region'];
-        
-        bucketInfo = {
-          storageClass: pvData.spec.storageClassName,
-          capacity: pvData.spec.capacity?.storage,
-          accessModes: pvData.spec.accessModes,
-          csiDriver: pvData.spec.csi?.driver,
-          volumeHandle: pvData.spec.csi?.volumeHandle,
-          region: region
-        };
-        
-        console.log(`Extracted bucket info: bucket=${bucketName}, region=${region}`);
-      }
-      
-      // 如果从volumeAttributes中没有找到，尝试从volumeHandle中解析
-      if (!bucketName && pvData.spec && pvData.spec.csi && pvData.spec.csi.volumeHandle) {
-        const volumeHandle = pvData.spec.csi.volumeHandle;
-        console.log('Trying to extract bucket from volumeHandle:', volumeHandle);
-        
-        // volumeHandle通常包含桶名，格式可能是: s3://bucket-name 或 bucket-name
-        if (volumeHandle.startsWith('s3://')) {
-          bucketName = volumeHandle.replace('s3://', '').split('/')[0];
-        } else if (volumeHandle.includes('::')) {
-          // 某些CSI驱动使用 region::bucket-name 格式
-          const parts = volumeHandle.split('::');
-          if (parts.length >= 2) {
-            region = parts[0];
-            bucketName = parts[1];
-          }
-        } else {
-          // 直接使用volumeHandle作为桶名
-          bucketName = volumeHandle;
-        }
-        
-        console.log(`Extracted from volumeHandle: bucket=${bucketName}, region=${region}`);
-      }
-      
-      // 检查 mountOptions 中的 region 信息
-      if (!region && pvData.spec && pvData.spec.mountOptions) {
-        const mountOptions = pvData.spec.mountOptions;
-        console.log('Checking mountOptions for region:', mountOptions);
-        
-        for (const option of mountOptions) {
-          if (typeof option === 'string' && option.startsWith('region ')) {
-            region = option.replace('region ', '').trim();
-            console.log(`Found region in mountOptions: ${region}`);
-            break;
-          }
-        }
-      }
-      
-      // 更新 bucketInfo 中的 region 信息
-      if (bucketInfo && region) {
-        bucketInfo.region = region;
-        console.log(`Updated bucketInfo with region: ${region}`);
-      }
-      
-      // 如果还是没有找到，尝试从annotations中获取
-      if (!bucketName && pvData.metadata && pvData.metadata.annotations) {
-        const annotations = pvData.metadata.annotations;
-        bucketName = annotations['s3.bucket'] || 
-                    annotations['csi.storage.k8s.io/bucket'] ||
-                    annotations['volume.beta.kubernetes.io/bucket'];
-        
-        if (!region) {
-          region = annotations['s3.region'] || 
-                  annotations['csi.storage.k8s.io/region'] ||
-                  annotations['volume.beta.kubernetes.io/region'];
-        }
-        
-        console.log(`Extracted from annotations: bucket=${bucketName}, region=${region}`);
-      }
-      
-    } catch (pvError) {
-      console.error('Could not get s3-pv PV info:', pvError.error);
-      return res.json({
-        success: false,
-        error: `Failed to get s3-pv PersistentVolume: ${pvError.error}`,
-        bucketInfo: null
+    // 找到对应的存储配置
+    const selectedStorage = storageResult.storages.find(s => s.pvcName === storage) || 
+                           storageResult.storages.find(s => s.pvcName === 's3-claim') ||
+                           storageResult.storages[0];
+    
+    if (!selectedStorage) {
+      return res.json({ 
+        success: true, 
+        data: [], 
+        bucketInfo: { bucket: 'No storage configured', region: 'Unknown' }
       });
     }
     
-    // 验证是否成功获取到桶名
-    if (!bucketName) {
-      return res.json({
-        success: false,
-        error: 'Could not extract S3 bucket name from s3-pv PersistentVolume',
-        bucketInfo: bucketInfo,
-        message: 'S3 bucket information not found in PV configuration'
-      });
-    }
+    console.log(`📦 Using storage: ${selectedStorage.name} -> ${selectedStorage.bucketName}`);
     
-    console.log(`Using S3 bucket: ${bucketName} in region: ${region || 'default'}`);
+    // 使用AWS CLI获取S3内容
+    let s3Data = [];
+    const region = selectedStorage.region || 'us-west-2';
+    const awsCommand = `aws s3 ls s3://${selectedStorage.bucketName}/ --region ${region}`;
     
-    // 尝试列出S3内容 - 只获取一级目录和文件
+    console.log(`🔍 Executing: ${awsCommand}`);
+    
     try {
-      const s3ListResult = await new Promise((resolve, reject) => {
-        const s3Command = region ? 
-          `aws s3 ls s3://${bucketName}/ --region ${region}` :
-          `aws s3 ls s3://${bucketName}/`;
-          
-        console.log('Executing S3 command:', s3Command);
-        
-        exec(s3Command, (error, stdout, stderr) => {
-          if (error) {
-            console.error('S3 command error:', error.message);
-            console.error('S3 command stderr:', stderr);
-            reject({ error: error.message, stderr });
-          } else {
-            resolve(stdout);
-          }
-        });
-      });
+      const { exec } = require('child_process');
+      const { promisify } = require('util');
+      const execAsync = promisify(exec);
       
-      // 解析S3 ls输出
-      const s3Items = [];
-      if (s3ListResult.trim()) {
-        const lines = s3ListResult.trim().split('\n');
-        console.log(`Processing ${lines.length} S3 items...`);
+      const { stdout, stderr } = await execAsync(awsCommand);
+      
+      if (stderr) {
+        console.warn('AWS CLI stderr:', stderr);
+      }
+      
+      console.log('AWS CLI stdout:', stdout);
+      
+      if (stdout) {
+        const lines = stdout.split('\n').filter(line => line.trim());
         
-        lines.forEach(line => {
-          const trimmedLine = line.trim();
-          if (!trimmedLine) return;
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
           
-          // S3 ls 输出格式:
-          // 对于目录: "                           PRE dirname/"
-          // 对于文件: "2023-08-06 05:48:52       1234 filename.txt"
-          
-          if (trimmedLine.includes('PRE ')) {
-            // 这是一个目录
-            const dirName = trimmedLine.split('PRE ')[1];
-            s3Items.push({
-              key: dirName,
-              name: dirName.replace('/', ''),
-              size: null,
-              lastModified: null,
+          if (trimmed.startsWith('PRE ')) {
+            // 文件夹格式: "PRE folder-name/"
+            const folderName = trimmed.substring(4); // 去掉 "PRE "
+            s3Data.push({
+              key: folderName,
               type: 'folder',
-              storageClass: null
+              size: null,
+              lastModified: new Date().toISOString()
             });
           } else {
-            // 这是一个文件
-            const parts = trimmedLine.split(/\s+/);
-            if (parts.length >= 3) {
+            // 文件格式: "2025-08-15 09:18:57 0 filename"
+            const parts = trimmed.split(/\s+/);
+            if (parts.length >= 4) {
               const date = parts[0];
               const time = parts[1];
-              const size = parseInt(parts[2]);
-              const fileName = parts.slice(3).join(' ');
+              const size = parts[2];
+              const name = parts.slice(3).join(' ');
               
-              s3Items.push({
-                key: fileName,
-                name: fileName,
-                size: size,
-                lastModified: `${date} ${time}`,
+              s3Data.push({
+                key: name,
                 type: 'file',
+                size: parseInt(size) || 0,
+                lastModified: new Date(`${date} ${time}`).toISOString(),
                 storageClass: 'STANDARD'
               });
             }
           }
-        });
+        }
       }
       
-      console.log(`Successfully retrieved ${s3Items.length} items from S3`);
+      console.log(`📊 Found ${s3Data.length} items in S3`);
       
-      res.json({
-        success: true,
-        data: s3Items,
-        bucketInfo: {
-          bucket: bucketName,
-          region: region || 'us-east-1',
-          ...bucketInfo
-        }
-      });
-      
-    } catch (s3Error) {
-      console.error('S3 list error:', s3Error);
-      res.json({
-        success: false,
-        error: `Failed to list S3 contents: ${s3Error.error || s3Error}`,
-        bucketInfo: {
-          bucket: bucketName,
-          region: region || 'us-east-1',
-          ...bucketInfo
-        }
-      });
+    } catch (awsError) {
+      console.error('AWS CLI error:', awsError);
+      throw new Error(`Failed to list S3 contents: ${awsError.message}`);
     }
     
-  } catch (error) {
-    console.error('S3 storage API error:', error);
-    res.json({ 
-      success: false, 
-      error: error.message,
-      bucketInfo: null
+    res.json({
+      success: true,
+      data: s3Data,
+      bucketInfo: {
+        bucket: selectedStorage.bucketName,
+        region: selectedStorage.region || 'Unknown',
+        pvcName: selectedStorage.pvcName
+      }
     });
+    
+  } catch (error) {
+    console.error('❌ Error fetching S3 storage:', error);
+    res.json({ success: false, error: error.message });
   }
 });
-
-// ==================== 集群管理 API ====================
-
-// 保存集群配置到 init_envs 文件
-
-// 执行集群配置脚本 (Step 2)
-// ==================== 集群管理 API ====================
-
-// 日志管理类
-class ClusterLogManager {
-  constructor() {
-    this.baseDir = path.join(__dirname, '../tmp/cluster-management');
-    this.logsDir = path.join(this.baseDir, 'logs');
-    this.currentDir = path.join(this.baseDir, 'current');
-    this.metadataDir = path.join(this.baseDir, 'metadata');
-    
-    // 确保目录存在
-    [this.baseDir, this.logsDir, this.currentDir, this.metadataDir].forEach(dir => {
-      fs.ensureDirSync(dir);
-    });
-  }
-
-  createLogFile(step) {
-    const timestamp = new Date().toISOString()
-      .replace(/:/g, '-')
-      .replace(/\..+/, '')
-      .replace('T', '_');
-    
-    const logFileName = `${timestamp}_${step}.log`;
-    const logFilePath = path.join(this.logsDir, logFileName);
-    const currentLinkPath = path.join(this.currentDir, `${step}.log`);
-    
-    // 创建日志文件
-    fs.writeFileSync(logFilePath, '');
-    
-    // 创建/更新软链接
-    if (fs.existsSync(currentLinkPath)) {
-      fs.unlinkSync(currentLinkPath);
-    }
-    fs.symlinkSync(path.relative(this.currentDir, logFilePath), currentLinkPath);
-    
-    return {
-      logFilePath,
-      logId: path.basename(logFileName, '.log')
-    };
-  }
-
-  getCurrentLogContent(step) {
-    const currentLogPath = path.join(this.currentDir, `${step}.log`);
-    if (fs.existsSync(currentLogPath)) {
-      return fs.readFileSync(currentLogPath, 'utf8');
-    }
-    return '';
-  }
-
-  updateStatus(step, status) {
-    const statusFile = path.join(this.metadataDir, `${step}_status.json`);
-    const statusData = {
-      step,
-      status,
-      timestamp: new Date().toISOString(),
-      logId: this.getCurrentLogId(step)
-    };
-    fs.writeFileSync(statusFile, JSON.stringify(statusData, null, 2));
-  }
-
-  getCurrentLogId(step) {
-    const currentLogPath = path.join(this.currentDir, `${step}.log`);
-    if (fs.existsSync(currentLogPath)) {
-      const realPath = fs.readlinkSync(currentLogPath);
-      return path.basename(realPath, '.log');
-    }
-    return null;
-  }
-}
-
-const logManager = new ClusterLogManager();
-
-// 检查 Step 1 状态的函数 - 基于 CloudFormation
-async function checkStep1Status() {
-  try {
-    // 使用多集群管理器获取活跃集群配置
-    const ClusterManager = require('./cluster-manager');
-    const clusterManager = new ClusterManager();
-    const activeCluster = clusterManager.getActiveCluster();
-    
-    if (!activeCluster) {
-      return { status: 'unknown', error: 'No active cluster found' };
-    }
-
-    // 从活跃集群的配置目录读取
-    const configDir = clusterManager.getClusterConfigDir(activeCluster);
-    const initEnvsPath = path.join(configDir, 'init_envs');
-    
-    if (!fs.existsSync(initEnvsPath)) {
-      return { status: 'unknown', error: `init_envs not found for cluster: ${activeCluster}` };
-    }
-    
-    const envContent = fs.readFileSync(initEnvsPath, 'utf8');
-    
-    // 首先解析 CLUSTER_TAG
-    const clusterTagMatch = envContent.match(/export CLUSTER_TAG=(.+)/);
-    if (!clusterTagMatch) {
-      return { status: 'unknown', error: 'CLUSTER_TAG not found in init_envs' };
-    }
-    
-    const clusterTag = clusterTagMatch[1].trim();
-    const stackName = `full-stack-${clusterTag}`;
-    
-    // 检查状态缓存文件
-    const statusCacheFile = path.join(logManager.metadataDir, 'step1_status_cache.json');
-    let cachedStatus = null;
-    
-    if (fs.existsSync(statusCacheFile)) {
-      try {
-        cachedStatus = JSON.parse(fs.readFileSync(statusCacheFile, 'utf8'));
-        // 如果堆栈名称没有变化且状态是完成，直接返回缓存
-        if (cachedStatus.stackName === stackName && cachedStatus.status === 'completed') {
-          console.log(`Using cached status for stack: ${stackName}`);
-          return cachedStatus;
-        }
-      } catch (error) {
-        console.warn('Failed to read status cache:', error);
-      }
-    }
-    
-    console.log(`Checking CloudFormation status for stack: ${stackName}`);
-    
-    // 查询 CloudFormation 状态
-    const command = `aws cloudformation describe-stacks --stack-name "${stackName}" --output json`;
-    
-    return new Promise((resolve) => {
-      exec(command, { timeout: 30000 }, (error, stdout, stderr) => {
-        let result;
-        
-        if (error) {
-          console.error('CloudFormation query error:', error.message);
-          if (stderr.includes('does not exist')) {
-            result = { status: 'not_started', stackName };
-          } else {
-            result = { status: 'error', error: error.message, stackName };
-          }
-        } else {
-          try {
-            const cfResult = JSON.parse(stdout);
-            if (cfResult.Stacks && cfResult.Stacks.length > 0) {
-              const stack = cfResult.Stacks[0];
-              const cfStatus = stack.StackStatus;
-              
-              console.log(`CloudFormation status: ${cfStatus}`);
-              
-              let status;
-              if (cfStatus === 'CREATE_COMPLETE' || cfStatus === 'UPDATE_COMPLETE') {
-                status = 'completed';
-              } else if (cfStatus.includes('IN_PROGRESS')) {
-                status = 'running';
-              } else if (cfStatus.includes('FAILED')) {
-                status = 'failed';
-              } else {
-                status = 'unknown';
-              }
-              
-              result = {
-                status,
-                stackName,
-                cloudFormationStatus: cfStatus,
-                lastUpdated: stack.LastUpdatedTime || stack.CreationTime,
-                clusterTag: clusterTag
-              };
-            } else {
-              result = { status: 'not_found', stackName };
-            }
-          } catch (parseError) {
-            console.error('Error parsing CloudFormation response:', parseError);
-            result = { status: 'error', error: 'Failed to parse CloudFormation response', stackName };
-          }
-        }
-        
-        // 缓存状态到文件
-        try {
-          fs.writeFileSync(statusCacheFile, JSON.stringify(result, null, 2));
-        } catch (cacheError) {
-          console.warn('Failed to cache status:', cacheError);
-        }
-        
-        resolve(result);
-      });
-    });
-
-  } catch (error) {
-    console.error('Error in checkStep1Status:', error);
-    return { status: 'error', error: error.message };
-  }
-}
-
-// 检查 Step 2 状态的函数 - 基于 Kubernetes 资源
-async function checkStep2Status() {
-  try {
-    // 使用多集群管理器获取活跃集群配置
-    const ClusterManager = require('./cluster-manager');
-    const clusterManager = new ClusterManager();
-    const activeCluster = clusterManager.getActiveCluster();
-    
-    if (!activeCluster) {
-      return { status: 'unknown', error: 'No active cluster found' };
-    }
-
-    // 从活跃集群的配置目录读取
-    const configDir = clusterManager.getClusterConfigDir(activeCluster);
-    const initEnvsPath = path.join(configDir, 'init_envs');
-    
-    if (!fs.existsSync(initEnvsPath)) {
-      return { status: 'unknown', error: `init_envs not found for cluster: ${activeCluster}` };
-    }
-    
-    const envContent = fs.readFileSync(initEnvsPath, 'utf8');
-    const clusterTagMatch = envContent.match(/export CLUSTER_TAG=(.+)/);
-    const clusterTag = clusterTagMatch ? clusterTagMatch[1].trim() : activeCluster;
-    
-    // 检查活跃集群的状态缓存文件
-    const metadataDir = clusterManager.getClusterMetadataDir(activeCluster);
-    const statusCacheFile = path.join(metadataDir, 'step2_status_cache.json');
-    let cachedStatus = null;
-    
-    if (fs.existsSync(statusCacheFile)) {
-      try {
-        cachedStatus = JSON.parse(fs.readFileSync(statusCacheFile, 'utf8'));
-        // 如果集群标签没有变化且状态是完成，直接返回缓存
-        if (cachedStatus.clusterTag === clusterTag && cachedStatus.status === 'completed') {
-          console.log(`Using cached Step 2 status for cluster: ${clusterTag}`);
-          return cachedStatus;
-        }
-      } catch (error) {
-        console.warn('Failed to read Step 2 status cache:', error);
-      }
-    }
-    
-    console.log(`Checking Step 2 (Kubernetes) status for cluster: ${clusterTag}`);
-    
-    const checks = [];
-    
-    // 检查 1: S3 CSI Node Pods (在 kube-system 命名空间)
-    const checkS3CSINodes = new Promise((resolve) => {
-      exec('kubectl get pods -n kube-system -l app=s3-csi-node -o json', { timeout: 10000 }, (error, stdout) => {
-        if (error) {
-          resolve({ name: 's3-mount', status: 'missing', error: error.message });
-        } else {
-          try {
-            const result = JSON.parse(stdout);
-            const pods = result.items || [];
-            
-            if (pods.length === 0) {
-              resolve({ name: 's3-mount', status: 'missing', message: 'No s3-csi-node pods found' });
-            } else {
-              const runningPods = pods.filter(pod => pod.status?.phase === 'Running');
-              const readyPods = pods.filter(pod => {
-                const conditions = pod.status?.conditions || [];
-                return conditions.some(condition => 
-                  condition.type === 'Ready' && condition.status === 'True'
-                );
-              });
-              
-              resolve({
-                name: 's3-mount',
-                status: readyPods.length === pods.length ? 'ready' : 'not_ready'
-              });
-            }
-          } catch (parseError) {
-            resolve({ name: 's3-mount', status: 'error', error: 'Failed to parse s3-csi-node pods data' });
-          }
-        }
-      });
-    });
-
-    // 检查 2: HyperPod Training Operator Pod
-    const checkHPOperator = new Promise((resolve) => {
-      exec('kubectl get pods -A -l app.kubernetes.io/name=hp-training-operator -o json', { timeout: 10000 }, (error, stdout) => {
-        if (error) {
-          resolve({ name: 'training-op', status: 'missing', error: error.message });
-        } else {
-          try {
-            const result = JSON.parse(stdout);
-            const pods = result.items || [];
-            
-            if (pods.length === 0) {
-              resolve({ name: 'training-op', status: 'missing' });
-            } else {
-              const runningPods = pods.filter(pod => pod.status?.phase === 'Running');
-              resolve({
-                name: 'training-op',
-                status: runningPods.length > 0 ? 'ready' : 'not_ready'
-              });
-            }
-          } catch (parseError) {
-            resolve({ name: 'training-op', status: 'error', error: 'Failed to parse pods data' });
-          }
-        }
-      });
-    });
-
-    // 检查 3: 特定的 controller manager pod
-    const checkControllerManager = new Promise((resolve) => {
-      exec('kubectl get pods -A -o name | grep -E "hp-training-controller-manager|training-operator"', { timeout: 10000 }, (error, stdout) => {
-        if (error || !stdout.trim()) {
-          resolve({ name: 'controller-manager', status: 'missing' });
-        } else {
-          const pods = stdout.trim().split('\n').filter(line => line.trim());
-          resolve({ 
-            name: 'controller-manager', 
-            status: pods.length > 0 ? 'ready' : 'missing',
-            pods: pods
-          });
-        }
-      });
-    });
-
-    // 等待所有检查完成
-    const results = await Promise.all([checkS3CSINodes, checkHPOperator, checkControllerManager]);
-    
-    // 判断整体状态
-    const readyCount = results.filter(result => result.status === 'ready').length;
-    const missingCount = results.filter(result => result.status === 'missing').length;
-    const errorCount = results.filter(result => result.status === 'error').length;
-
-    let overallStatus;
-    if (readyCount === results.length) {
-      overallStatus = 'completed';
-    } else if (errorCount > 0) {
-      overallStatus = 'error';
-    } else if (missingCount === results.length) {
-      overallStatus = 'not_started';
-    } else {
-      overallStatus = 'partial'; // 部分组件就绪
-    }
-
-    const result = {
-      status: overallStatus,
-      checks: results,
-      summary: {
-        total: results.length,
-        ready: readyCount,
-        missing: missingCount,
-        error: errorCount
-      },
-      clusterTag: clusterTag,
-      lastChecked: new Date().toISOString()
-    };
-    
-    // 缓存状态到文件
-    try {
-      fs.writeFileSync(statusCacheFile, JSON.stringify(result, null, 2));
-    } catch (cacheError) {
-      console.warn('Failed to cache Step 2 status:', cacheError);
-    }
-    
-    return result;
-
-  } catch (error) {
-    console.error('Error in checkStep2Status:', error);
-    return { status: 'error', error: error.message };
-  }
-}
-
-// 执行集群配置脚本 (Step 2) - 使用 nohup 后台执行
-
-// 获取 MLFlow 服务器信息 API - 支持多集群
 app.get('/api/cluster/mlflow-info', (req, res) => {
   try {
     // 使用多集群管理器获取活跃集群的MLflow信息

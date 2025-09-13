@@ -9,7 +9,7 @@ export const REFRESH_CONFIG = {
     autoRefreshEnabled: false,        // 默认关闭自动刷新
     autoRefreshInterval: 60000,       // 自动刷新间隔60秒
     maxConcurrentRefresh: 5,          // 最大并发刷新数
-    refreshTimeout: 30000,            // 单个刷新超时30秒
+    refreshTimeout: 60000,            // 单个刷新超时60秒
     retryAttempts: 2,                 // 失败重试次数
     showRefreshNotifications: true,   // 显示刷新通知
     enableDebugLogs: process.env.NODE_ENV === 'development' // 开发环境启用调试日志
@@ -23,6 +23,7 @@ export const REFRESH_CONFIG = {
     'pods-services': 8,               // 高优先级 - Pods和Services数据
     'training-monitor': 8,            // 高优先级 - 训练监控
     'deployment-manager': 7,          // 高优先级 - 部署管理
+    's3-storage-manager': 6,          // 中高优先级 - S3存储管理
     'training-history': 6,            // 中高优先级 - 训练历史
     'status-monitor': 4,              // 中优先级 - 状态监控（已被app-status替代）
     'config-panel': 2,                // 低优先级 - 配置面板

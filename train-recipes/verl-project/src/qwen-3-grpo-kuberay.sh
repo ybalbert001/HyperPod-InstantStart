@@ -41,7 +41,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.project_name='verl_grpo_example_gsm8k' \
     trainer.experiment_name='qwen2_3b_function_rm_kuberay' \
     trainer.n_gpus_per_node=4 \
-    trainer.nnodes=1 \
+    trainer.nnodes=2 \
     trainer.save_freq=20 \
     trainer.test_freq=5 \
     trainer.total_epochs=15 $@

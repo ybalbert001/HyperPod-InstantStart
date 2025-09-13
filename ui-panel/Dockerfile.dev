@@ -1,0 +1,49 @@
+FROM node:18-slim
+
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    curl \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install AWS CLI
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
+    && unzip awscliv2.zip \
+    && ./aws/install \
+    && rm -rf awscliv2.zip aws
+
+# Install kubectl
+RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
+    && chmod +x kubectl \
+    && mv kubectl /usr/local/bin/
+
+WORKDIR /app
+
+# 创建node用户的目录并设置权限
+RUN mkdir -p /home/node/.kube /home/node/.aws && chown -R node:node /home/node
+
+COPY package*.json ./
+COPY client/package*.json ./client/
+
+RUN npm install
+RUN cd client && npm install
+
+COPY requirements.txt* ./
+RUN if [ -f requirements.txt ]; then \
+    pip3 install --break-system-packages -r requirements.txt; \
+    fi
+
+RUN mkdir -p logs tmp
+
+# 确保node用户拥有所有必要的权限
+RUN chown -R node:node /app
+
+# 设置环境变量
+ENV KUBECONFIG=/home/node/.kube/config
+ENV HOME=/home/node
+
+EXPOSE 3099 3001 8081
+
+CMD ["sh", "-c", "echo '🚀 Starting Model Deployment Management Dashboard (Container Mode)...' && \
+     npm run dev"]

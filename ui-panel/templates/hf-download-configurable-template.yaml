@@ -1,0 +1,69 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: model-download-job-MODEL_TAG
+spec:
+  ttlSecondsAfterFinished: 60
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: model-download-job-MODEL_TAG
+    spec:
+      containers:
+        - name: python-container
+          image: python:3.12
+          resources:
+            requests:
+              cpu: "CPU_REQUEST"
+              memory: MEMORY_REQUEST
+            limits:
+              cpu: "CPU_LIMIT"
+              memory: MEMORY_LIMIT
+          command: ["/bin/bash"]
+          args:
+            - -c
+            - |
+              echo "Installing HF CLI ..."
+              pip install -U "huggingface_hub[cli,hf_transfer]"
+              echo "Downloading HF model..."
+              #  --token=$HF_TOKEN
+              hf download HF_MODEL_ID --local-dir /nvme/HF_MODEL_ID --cache-dir /root/.cache/HF_MODEL_ID
+              echo "Downloading Complete ..."
+              rm -rf /nvme/HF_MODEL_ID/.cache
+              cp -r /nvme/HF_MODEL_ID /s3/$(echo HF_MODEL_ID | tr '/' '-')
+              echo "Transfer to S3 Complete ..."
+          volumeMounts:
+            - name: persistent-storage-s3
+              mountPath: /s3
+              readOnly: false
+            - name: local-cache
+              mountPath: /root/.cache
+            - name: local-nvme
+              mountPath: /nvme
+            - name: shm
+              mountPath: /dev/shm
+          env:HF_TOKEN_ENV
+            - name: HF_HOME
+              value: "/root/.cache/huggingface"
+            - name: HF_HUB_ENABLE_HF_TRANSFER
+              value: "1"
+            - name: HF_HUB_DOWNLOAD_TIMEOUT
+              value: "60"
+      volumes:
+        - name: persistent-storage-s3
+          persistentVolumeClaim:
+            claimName: S3_PVC_NAME
+        - name: local-cache
+          hostPath:
+            path: /opt/dlami/nvme/.cache
+            type: DirectoryOrCreate
+        - name: local-nvme
+          hostPath:
+            path: /opt/dlami/nvme
+            type: DirectoryOrCreate
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
+      restartPolicy: Never

@@ -5,7 +5,7 @@ metadata:
   # name: verl-training
   namespace: default
 spec:
-  entrypoint: bash /s3/train-recipes/verl-project/src/qwen-3b-grpo-kuberay.sh
+  entrypoint: bash /s3/train-recipes/verl-project/src/qwen-3-grpo-kuberay.sh
   backoffLimit: 0
   shutdownAfterJobFinishes: true
   ttlSecondsAfterFinished: 3600

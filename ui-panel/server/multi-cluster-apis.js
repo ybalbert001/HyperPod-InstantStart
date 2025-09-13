@@ -126,7 +126,14 @@ class MultiClusterAPIs {
       const command = `aws eks update-kubeconfig --region ${awsRegion} --name ${eksClusterName}`;
       
       return new Promise((resolve, reject) => {
-        exec(command, { timeout: 30000 }, (error, stdout, stderr) => {
+        exec(command, { 
+          timeout: 30000,
+          env: { 
+            ...process.env, 
+            HOME: process.env.HOME || '/home/node',
+            KUBECONFIG: process.env.KUBECONFIG || '/home/node/.kube/config'
+          }
+        }, (error, stdout, stderr) => {
           if (error) {
             console.error(`Failed to update kubectl config: ${error.message}`);
             console.error(`Command: ${command}`);
@@ -598,12 +605,12 @@ class MultiClusterAPIs {
   // 导入现有集群
   async handleImportCluster(req, res) {
     try {
-      const { eksClusterName, awsRegion, s3BucketName } = req.body;
+      const { eksClusterName, awsRegion } = req.body;
       
-      if (!eksClusterName || !awsRegion || !s3BucketName) {
+      if (!eksClusterName || !awsRegion) {
         return res.status(400).json({
           success: false,
-          error: 'eksClusterName, awsRegion, and s3BucketName are required'
+          error: 'eksClusterName and awsRegion are required'
         });
       }
 
@@ -626,7 +633,6 @@ class MultiClusterAPIs {
         CLUSTER_TYPE: 'imported',
         EKS_CLUSTER_NAME: eksClusterName,
         AWS_REGION: awsRegion,
-        S3_BUCKET_NAME: s3BucketName,
         SKIP_CLUSTER_CREATION: 'true',
         SKIP_CLOUDFORMATION: 'true'
       };
@@ -697,7 +703,13 @@ class MultiClusterAPIs {
           const originalContext = currentContext ? currentContext.trim() : null;
           
           // 3. 临时更新kubectl配置进行测试
-          exec(`aws eks update-kubeconfig --region ${awsRegion} --name ${eksClusterName}`, (kubectlError) => {
+          exec(`aws eks update-kubeconfig --region ${awsRegion} --name ${eksClusterName}`, {
+            env: { 
+              ...process.env, 
+              HOME: process.env.HOME || '/home/node',
+              KUBECONFIG: process.env.KUBECONFIG || '/home/node/.kube/config'
+            }
+          }, (kubectlError) => {
             if (kubectlError) {
               resolve({
                 success: false,

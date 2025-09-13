@@ -16,6 +16,7 @@ import HyperPodJobManager from './components/HyperPodJobManager';
 import ClusterManagement from './components/ClusterManagement';
 import GlobalRefreshButton from './components/GlobalRefreshButton';
 import OperationFeedback from './components/OperationFeedback';
+import EnhancedModelManagement from './components/EnhancedModelManagement';
 import globalRefreshManager from './hooks/useGlobalRefresh';
 import operationRefreshManager from './hooks/useOperationRefresh';
 import { refreshManager } from './hooks/useAutoRefresh';
@@ -606,29 +607,13 @@ function App() {
             <TrainingHistoryPanel />
           </div>
           
-          <Row gutter={[16, 16]} style={{ display: activeMainTab === 'model-management' ? 'flex' : 'none' }}>
-            {/* Model Management - 左侧：模型下载 */}
-            <Col xs={24} lg={12}>
-              <Card 
-                title="Model Download" 
-                className="theme-card storage"
-                style={{ height: '50vh', overflow: 'auto' }}
-              >
-                <ModelDownloadPanel />
-              </Card>
-            </Col>
-            
-            {/* Model Management - 右侧：S3存储 */}
-            <Col xs={24} lg={12}>
-              <Card 
-                title="S3 Storage"
-                className="theme-card storage"
-                style={{ height: '50vh', overflow: 'auto' }}
-              >
-                <S3StoragePanel />
-              </Card>
-            </Col>
-          </Row>
+          <div style={{ 
+            display: activeMainTab === 'model-management' ? 'block' : 'none',
+            padding: '16px',
+            height: '50vh'
+          }}>
+            <EnhancedModelManagement />
+          </div>
         </div>
         
         {/* 底部监控区域 (共享) */}

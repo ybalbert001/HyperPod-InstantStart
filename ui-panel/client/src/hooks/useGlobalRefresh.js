@@ -131,7 +131,7 @@ class GlobalRefreshManager {
         try {
           // 设置超时
           const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Refresh timeout')), this.config.refreshTimeout);
+            setTimeout(() => reject(new Error(`Refresh timeout for ${componentId}`)), this.config.refreshTimeout);
           });
 
           const refreshPromise = subscriber.callback();
