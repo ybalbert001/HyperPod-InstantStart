@@ -269,7 +269,19 @@ const ClusterManagement = () => {
           await fetch('/api/cluster-status/clear-cache', { method: 'POST' });
           console.log('Cleared cluster status cache');
         } catch (cacheError) {
-          console.warn('Failed to clear cache:', cacheError);
+          console.warn('Failed to clear cluster status cache:', cacheError);
+        }
+
+        // 清除App Status缓存
+        try {
+          await fetch('/api/v2/app-status/clear-cache', { 
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'all' })
+          });
+          console.log('Cleared app status cache');
+        } catch (appCacheError) {
+          console.warn('Failed to clear app status cache:', appCacheError);
         }
         
         // 延迟5秒刷新状态，给kubectl配置切换足够时间
@@ -310,38 +322,6 @@ const ClusterManagement = () => {
     setActiveTab('create');
     
     message.info(`Ready to create new cluster: ${newClusterTag}`);
-  };
-
-  // 手动切换kubectl配置
-  const switchKubectlConfig = async () => {
-    if (!activeCluster) {
-      message.warning('No active cluster selected');
-      return;
-    }
-
-    setClustersLoading(true);
-    try {
-      const response = await fetch('/api/multi-cluster/switch-kubectl', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      });
-      
-      const result = await response.json();
-      if (result.success) {
-        message.success(`Kubectl config updated for cluster: ${activeCluster}`);
-        // 刷新状态以显示新的集群信息
-        setTimeout(() => {
-          refreshAllStatus();
-        }, 2000);
-      } else {
-        message.error(result.error || 'Failed to switch kubectl config');
-      }
-    } catch (error) {
-      console.error('Failed to switch kubectl config:', error);
-      message.error('Failed to switch kubectl config');
-    } finally {
-      setClustersLoading(false);
-    }
   };
 
   useEffect(() => {
@@ -723,12 +703,24 @@ const ClusterManagement = () => {
                     <Row gutter={16} align="middle" style={{ marginBottom: 24 }}>
                       <Col flex="auto">
                         <Space direction="vertical" style={{ width: '100%' }}>
-                          <div>
+                          {/* 集群列表刷新按钮 */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <Text strong>Active Cluster:</Text>
+                            <Button 
+                              size="small"
+                              icon={<ReloadOutlined />} 
+                              onClick={fetchClusters}
+                              loading={clustersLoading}
+                              type="text"
+                            >
+                              Refresh
+                            </Button>
+                          </div>
+                          <div>
                             <Select
                               value={activeCluster}
                               onChange={switchCluster}
-                              style={{ width: '100%', marginTop: 8 }}
+                              style={{ width: '100%' }}
                               placeholder="Select a cluster or import/create one"
                               loading={clustersLoading}
                               allowClear
@@ -780,31 +772,8 @@ const ClusterManagement = () => {
                       </Col>
                     </Row>
 
-                    {/* 管理操作按钮 */}
-                    <Row gutter={16} style={{ marginBottom: 24 }}>
-                      <Col>
-                        <Button 
-                          icon={<ReloadOutlined />} 
-                          onClick={fetchClusters}
-                          loading={clustersLoading}
-                        >
-                          Refresh Clusters
-                        </Button>
-                      </Col>
-                      {activeCluster && (
-                        <Col>
-                          <Tooltip title="Switch kubectl config to active cluster">
-                            <Button 
-                              icon={<SettingOutlined />} 
-                              onClick={switchKubectlConfig}
-                              loading={clustersLoading}
-                              type="default"
-                            >
-                              Switch Kubectl
-                            </Button>
-                          </Tooltip>
-                        </Col>
-                      )}
+                    {/* 导入集群按钮 */}
+                    <Row style={{ marginBottom: 24 }}>
                       <Col>
                         <Button 
                           type="default"

@@ -616,19 +616,22 @@ class MultiClusterAPIs {
 
       console.log(`Importing existing cluster: ${eksClusterName} in ${awsRegion}`);
 
-      // 1. 测试连接
-      const connectionTest = await this.testConnection(eksClusterName, awsRegion);
-      if (!connectionTest.success) {
+      // 1. 验证集群存在
+      const clusterExists = await this.verifyClusterExists(eksClusterName, awsRegion);
+      if (!clusterExists.success) {
         return res.status(400).json({
           success: false,
-          error: `Connection test failed: ${connectionTest.error}`
+          error: `Cluster verification failed: ${clusterExists.error}`
         });
       }
 
-      // 2. 创建集群目录结构
+      // 2. 确保当前EC2 role有集群访问权限
+      const accessResult = await this.ensureClusterAccess(eksClusterName, awsRegion);
+      
+      // 3. 创建集群目录结构
       this.clusterManager.createClusterDirs(eksClusterName);
       
-      // 3. 生成导入配置
+      // 4. 生成导入配置
       const importConfig = {
         CLUSTER_TYPE: 'imported',
         EKS_CLUSTER_NAME: eksClusterName,
@@ -637,19 +640,23 @@ class MultiClusterAPIs {
         SKIP_CLOUDFORMATION: 'true'
       };
       
-      await this.clusterManager.saveImportConfig(eksClusterName, importConfig);
+      await this.clusterManager.saveImportConfig(eksClusterName, importConfig, accessResult);
       
-      // 4. 设置为活跃集群
+      // 5. 设置为活跃集群
       this.clusterManager.setActiveCluster(eksClusterName);
       
-      // 5. 更新kubectl配置
+      // 6. 更新kubectl配置
       await this.switchKubectlConfig(eksClusterName);
+
+      // 7. 获取节点数量
+      const nodeCount = await this.getNodeCount();
       
       res.json({
         success: true,
         message: `Successfully imported cluster: ${eksClusterName}`,
         clusterTag: eksClusterName,
-        nodeCount: connectionTest.nodeCount
+        nodeCount,
+        accessInfo: accessResult
       });
 
     } catch (error) {
@@ -685,7 +692,186 @@ class MultiClusterAPIs {
     }
   }
 
-  // 测试连接的内部方法
+  // 验证集群存在（不测试连接）
+  async verifyClusterExists(eksClusterName, awsRegion) {
+    return new Promise((resolve) => {
+      exec(`aws eks describe-cluster --region ${awsRegion} --name ${eksClusterName}`, (error, stdout) => {
+        if (error) {
+          resolve({
+            success: false,
+            error: `EKS cluster not found or access denied: ${error.message}`
+          });
+        } else {
+          resolve({
+            success: true,
+            message: `Cluster ${eksClusterName} exists and is accessible`
+          });
+        }
+      });
+    });
+  }
+
+  // 获取节点数量（在权限配置完成后）
+  async getNodeCount() {
+    return new Promise((resolve) => {
+      exec('kubectl get nodes --no-headers | wc -l', (error, stdout) => {
+        if (error) {
+          console.warn('Failed to get node count:', error.message);
+          resolve(0);
+        } else {
+          resolve(parseInt(stdout.trim()) || 0);
+        }
+      });
+    });
+  }
+  async ensureClusterAccess(eksClusterName, awsRegion) {
+    try {
+      // 1. 获取当前EC2的IAM role
+      const identity = await this.getCurrentIdentity();
+      const roleArn = this.extractRoleArn(identity.Arn);
+      
+      console.log(`Current EC2 role: ${roleArn}`);
+      
+      // 2. 检查是否已有access entry
+      const hasAccess = await this.checkExistingAccess(eksClusterName, roleArn, awsRegion);
+      
+      if (hasAccess.exists) {
+        console.log(`Access entry already exists for role: ${roleArn}`);
+        return {
+          action: 'existing',
+          message: 'Role already has cluster access',
+          roleArn,
+          policies: hasAccess.policies
+        };
+      }
+      
+      // 3. 创建access entry
+      await this.createAccessEntry(eksClusterName, roleArn, awsRegion);
+      
+      // 4. 关联cluster admin policy
+      await this.associateClusterAdminPolicy(eksClusterName, roleArn, awsRegion);
+      
+      console.log(`Successfully granted cluster admin access to role: ${roleArn}`);
+      
+      return {
+        action: 'created',
+        message: 'Successfully granted cluster admin access',
+        roleArn,
+        policies: ['AmazonEKSClusterAdminPolicy']
+      };
+      
+    } catch (error) {
+      console.warn(`Failed to ensure cluster access: ${error.message}`);
+      return {
+        action: 'failed',
+        message: `Access management failed: ${error.message}`,
+        warning: 'Cluster import will continue, but you may need to manually add access permissions'
+      };
+    }
+  }
+
+  // 获取当前身份
+  async getCurrentIdentity() {
+    return new Promise((resolve, reject) => {
+      exec('aws sts get-caller-identity', (error, stdout) => {
+        if (error) {
+          reject(new Error(`Failed to get caller identity: ${error.message}`));
+        } else {
+          resolve(JSON.parse(stdout));
+        }
+      });
+    });
+  }
+
+  // 从assumed role ARN中提取role ARN
+  extractRoleArn(assumedRoleArn) {
+    // 从 arn:aws:sts::account:assumed-role/role-name/session 
+    // 提取为 arn:aws:iam::account:role/role-name
+    const match = assumedRoleArn.match(/arn:aws:sts::(\d+):assumed-role\/([^\/]+)\//);
+    if (match) {
+      return `arn:aws:iam::${match[1]}:role/${match[2]}`;
+    }
+    throw new Error(`Invalid assumed role ARN format: ${assumedRoleArn}`);
+  }
+
+  // 检查现有访问权限
+  async checkExistingAccess(eksClusterName, roleArn, awsRegion) {
+    try {
+      // 检查access entry是否存在
+      const result = await new Promise((resolve, reject) => {
+        exec(`aws eks describe-access-entry --cluster-name ${eksClusterName} --principal-arn "${roleArn}" --region ${awsRegion}`, 
+          (error, stdout) => {
+            if (error) {
+              if (error.message.includes('ResourceNotFoundException')) {
+                resolve({ exists: false });
+              } else {
+                reject(error);
+              }
+            } else {
+              resolve({ exists: true, entry: JSON.parse(stdout) });
+            }
+          });
+      });
+
+      if (!result.exists) {
+        return { exists: false };
+      }
+
+      // 获取关联的policies
+      const policies = await new Promise((resolve, reject) => {
+        exec(`aws eks list-associated-access-policies --cluster-name ${eksClusterName} --principal-arn "${roleArn}" --region ${awsRegion}`, 
+          (error, stdout) => {
+            if (error) {
+              resolve([]);
+            } else {
+              const data = JSON.parse(stdout);
+              resolve(data.associatedAccessPolicies || []);
+            }
+          });
+      });
+
+      return { 
+        exists: true, 
+        policies: policies.map(p => p.policyArn.split('/').pop()) 
+      };
+
+    } catch (error) {
+      console.warn(`Error checking existing access: ${error.message}`);
+      return { exists: false };
+    }
+  }
+
+  // 创建access entry
+  async createAccessEntry(eksClusterName, roleArn, awsRegion) {
+    return new Promise((resolve, reject) => {
+      const command = `aws eks create-access-entry --cluster-name ${eksClusterName} --principal-arn "${roleArn}" --region ${awsRegion}`;
+      exec(command, (error, stdout) => {
+        if (error) {
+          reject(new Error(`Failed to create access entry: ${error.message}`));
+        } else {
+          console.log(`Created access entry for role: ${roleArn}`);
+          resolve(JSON.parse(stdout));
+        }
+      });
+    });
+  }
+
+  // 关联cluster admin policy
+  async associateClusterAdminPolicy(eksClusterName, roleArn, awsRegion) {
+    return new Promise((resolve, reject) => {
+      const policyArn = 'arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy';
+      const command = `aws eks associate-access-policy --cluster-name ${eksClusterName} --principal-arn "${roleArn}" --policy-arn ${policyArn} --access-scope type=cluster --region ${awsRegion}`;
+      
+      exec(command, (error, stdout) => {
+        if (error) {
+          reject(new Error(`Failed to associate cluster admin policy: ${error.message}`));
+        } else {
+          console.log(`Associated cluster admin policy for role: ${roleArn}`);
+          resolve(JSON.parse(stdout));
+        }
+      });
+    });
+  }
   async testConnection(eksClusterName, awsRegion) {
     return new Promise((resolve) => {
       // 1. 测试EKS集群是否存在

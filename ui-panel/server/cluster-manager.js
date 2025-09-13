@@ -198,7 +198,7 @@ class ClusterManager {
   }
 
   // 保存导入集群配置
-  async saveImportConfig(clusterTag, importConfig) {
+  async saveImportConfig(clusterTag, importConfig, accessInfo = null) {
     const configDir = this.getClusterConfigDir(clusterTag);
     const initEnvsPath = path.join(configDir, 'init_envs');
     
@@ -219,7 +219,14 @@ class ClusterManager {
       type: 'imported',
       importedAt: new Date().toISOString(),
       eksClusterName: importConfig.EKS_CLUSTER_NAME,
-      awsRegion: importConfig.AWS_REGION
+      awsRegion: importConfig.AWS_REGION,
+      accessEntry: accessInfo ? {
+        action: accessInfo.action,
+        roleArn: accessInfo.roleArn,
+        policies: accessInfo.policies || [],
+        configuredAt: new Date().toISOString(),
+        message: accessInfo.message
+      } : null
     };
     
     fs.writeFileSync(
