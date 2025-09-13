@@ -162,6 +162,15 @@ function App() {
             }
             break;
             
+          case 'hyperpod_software_update':
+            if (data.status === 'success') {
+              message.success(data.message);
+              operationRefreshManager.triggerOperationRefresh('hyperpod-software-update', data);
+            } else {
+              message.error(data.message);
+            }
+            break;
+            
           default:
             console.log('❓ Unknown message type:', data.type);
             break;

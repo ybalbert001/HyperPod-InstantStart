@@ -3807,6 +3807,8 @@ app.get('/api/cluster/nodegroups', async (req, res) => {
       
       for (const instanceGroup of hpData.InstanceGroups || []) {
         hyperPodGroups.push({
+          clusterName: hpClusterName,
+          clusterArn: hpData.ClusterArn,
           name: instanceGroup.InstanceGroupName,
           status: instanceGroup.Status,
           instanceType: instanceGroup.InstanceType,
@@ -3971,6 +3973,63 @@ app.put('/api/cluster/hyperpod/instances/:name/scale', async (req, res) => {
       status: 'error',
       message: `Failed to update HyperPod instance group: ${error.message}`
     });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/cluster/hyperpod/update-software', async (req, res) => {
+  try {
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    const fs = require('fs');
+    const path = require('path');
+    
+    const { clusterArn } = req.body;
+    
+    const ClusterManager = require('./cluster-manager');
+    const clusterManager = new ClusterManager();
+    const activeClusterName = clusterManager.getActiveCluster();
+    
+    if (!activeClusterName) {
+      return res.status(400).json({ error: 'No active cluster found' });
+    }
+
+    // 读取集群配置文件获取region
+    const configDir = clusterManager.getClusterConfigDir(activeClusterName);
+    const initEnvsPath = path.join(configDir, 'init_envs');
+    
+    if (!fs.existsSync(initEnvsPath)) {
+      return res.status(400).json({ error: 'Cluster configuration file not found' });
+    }
+
+    // 解析init_envs文件
+    const initEnvsContent = fs.readFileSync(initEnvsPath, 'utf8');
+    const regionMatch = initEnvsContent.match(/export AWS_REGION[="]([^"]+)["]/);
+    const region = regionMatch ? regionMatch[1] : 'us-west-2';
+
+    // 执行update-cluster-software命令
+    const updateCmd = `aws sagemaker update-cluster-software --cluster-name ${clusterArn} --region ${region}`;
+    
+    await execAsync(updateCmd);
+    
+    broadcast({
+      type: 'hyperpod_software_update',
+      status: 'success',
+      message: 'HyperPod cluster software update initiated successfully',
+      clusterArn: clusterArn
+    });
+
+    res.json({ success: true, message: 'Cluster software update initiated successfully' });
+  } catch (error) {
+    console.error('Error updating HyperPod cluster software:', error);
+    
+    broadcast({
+      type: 'hyperpod_software_update',
+      status: 'error',
+      message: `Failed to update cluster software: ${error.message}`
+    });
+
     res.status(500).json({ error: error.message });
   }
 });

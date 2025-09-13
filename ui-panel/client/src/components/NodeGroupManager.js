@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Table, Button, message, Tag, Space, Modal, InputNumber, Form } from 'antd';
-import { ReloadOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
+import { ReloadOutlined, EditOutlined, ToolOutlined } from '@ant-design/icons';
 import globalRefreshManager from '../hooks/useGlobalRefresh';
 import operationRefreshManager from '../hooks/useOperationRefresh';
 
@@ -116,6 +116,26 @@ const NodeGroupManager = () => {
     }
   };
 
+  const handleUpdateSoftware = async (record) => {
+    try {
+      const response = await fetch('/api/cluster/hyperpod/update-software', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clusterArn: record.clusterArn })
+      });
+
+      if (response.ok) {
+        message.success('HyperPod cluster software update initiated successfully');
+        fetchNodeGroups();
+      } else {
+        const error = await response.json();
+        message.error(`Failed to update cluster software: ${error.error}`);
+      }
+    } catch (error) {
+      message.error(`Error updating cluster software: ${error.message}`);
+    }
+  };
+
   const renderEKSActions = (record) => (
     <Space>
       <Button 
@@ -137,20 +157,28 @@ const NodeGroupManager = () => {
       >
         Scale
       </Button>
+      <Button 
+        size="small" 
+        icon={<ToolOutlined />}
+        onClick={() => handleUpdateSoftware(record)}
+      >
+        Update Cluster Software
+      </Button>
     </Space>
   );
 
   const eksColumns = [
-    { title: 'Name', dataIndex: 'name', key: 'name' },
+    { title: 'Node Group Name', dataIndex: 'name', key: 'name' },
     { title: 'Status', dataIndex: 'status', key: 'status', render: renderStatus },
     { title: 'Instance Types', dataIndex: 'instanceTypes', key: 'instanceTypes', render: types => types?.join(', ') },
-    { title: 'Capacity', dataIndex: 'capacityType', key: 'capacityType' },
+    { title: 'Capacity Type', dataIndex: 'capacityType', key: 'capacityType' },
     { title: 'Min/Max/Desired', key: 'scaling', render: renderScaling },
     { title: 'Actions', key: 'actions', render: renderEKSActions }
   ];
 
   const hyperPodColumns = [
-    { title: 'Name', dataIndex: 'name', key: 'name' },
+    { title: 'HyperPod Cluster Name', dataIndex: 'clusterName', key: 'clusterName' },
+    { title: 'Instance Group Name', dataIndex: 'name', key: 'name' },
     { title: 'Status', dataIndex: 'status', key: 'status', render: renderStatus },
     { title: 'Instance Type', dataIndex: 'instanceType', key: 'instanceType' },
     { title: 'Current/Target', key: 'count', render: renderCount },
@@ -159,18 +187,19 @@ const NodeGroupManager = () => {
 
   return (
     <div style={{ height: '100%' }}>
+      <div style={{ marginBottom: '16px', textAlign: 'right' }}>
+        <Button 
+          icon={<ReloadOutlined />} 
+          onClick={fetchNodeGroups}
+          loading={loading}
+          size="small"
+        >
+          Refresh Node Groups
+        </Button>
+      </div>
+      
       <Card 
         title="HyperPod Instance Groups"
-        extra={
-          <Button 
-            icon={<ReloadOutlined />} 
-            onClick={fetchNodeGroups}
-            loading={loading}
-            size="small"
-          >
-            Refresh
-          </Button>
-        }
         style={{ marginBottom: '16px' }}
         size="small"
       >
@@ -186,16 +215,6 @@ const NodeGroupManager = () => {
 
       <Card 
         title="EKS Node Groups" 
-        extra={
-          <Button 
-            icon={<ReloadOutlined />} 
-            onClick={fetchNodeGroups}
-            loading={loading}
-            size="small"
-          >
-            Refresh
-          </Button>
-        }
         size="small"
       >
         <Table 

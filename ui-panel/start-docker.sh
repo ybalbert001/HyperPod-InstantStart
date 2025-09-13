@@ -1,5 +1,9 @@
 #!/bin/bash
 
+REMOTE_REPO="public.ecr.aws/t5u4s6i0/hyperpod-instantstart-web:latest"
+LOCAL_IMAGE="ui-panel-dev2"
+
+
 echo "🐳 Starting Model Deployment UI with Docker (Development Mode)..."
 
 # 检查 Docker 是否安装
@@ -13,20 +17,19 @@ TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-meta
 PUBLIC_IP=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" -s http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null)
 
 # 清理可能存在的旧容器
-docker stop ui-panel-dev 2>/dev/null || true
-docker rm ui-panel-dev 2>/dev/null || true
+docker stop $LOCAL_IMAGE 2>/dev/null || true
+docker rm $LOCAL_IMAGE 2>/dev/null || true
 
-if ! docker images | grep -q ui-panel-dev; then
-    REMOTE_REPO="public.ecr.aws/t5u4s6i0/hyperpod-instantstart-web:latest"
-    
+
+if ! docker images | grep -q $LOCAL_IMAGE; then
     echo "📥 Trying to pull from remote repository..."
     if docker pull $REMOTE_REPO; then
         echo "✅ Successfully pulled from remote repository"
-        docker tag $REMOTE_REPO ui-panel-dev
-        echo "🏷️ Tagged as ui-panel-dev"
+        docker tag $REMOTE_REPO $LOCAL_IMAGE
+        echo "🏷️ Tagged as $LOCAL_IMAGE"
     else
         echo "🔧 Failed to pull from remote repository, building locally..."
-        docker build -f Dockerfile.dev -t ui-panel-dev .
+        docker build -f Dockerfile.dev -t $LOCAL_IMAGE .
     fi
 fi
 
@@ -37,7 +40,7 @@ mkdir -p ~/.kube ~/.aws logs tmp deployments managed_clusters_info
 echo "🚀 Creating and starting new container..."
 # --user root
 docker run -d \
-  --name ui-panel-dev \
+  --name $LOCAL_IMAGE \
   --network host \
   --user 1000:1000 \
   -v $(pwd)/server:/app/server \
@@ -58,10 +61,10 @@ docker run -d \
   -v ~/.aws:/home/node/.aws:ro \
   -e NODE_ENV=development \
   -e HOME=/home/node \
-  ui-panel-dev
+  $LOCAL_IMAGE
 
 echo "✅ Container is running!"
 echo "📊 Dashboard: http://localhost:3099"
 echo "📊 Dashboard: http://$PUBLIC_IP:3099"
-echo "🔍 View logs: docker logs -f ui-panel-dev"
-echo "🛑 Stop: docker stop ui-panel-dev"
+echo "🔍 View logs: docker logs -f $LOCAL_IMAGE"
+echo "🛑 Stop: docker stop $LOCAL_IMAGE"

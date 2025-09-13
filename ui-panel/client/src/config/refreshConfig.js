@@ -103,6 +103,13 @@ export const REFRESH_CONFIG = {
         { components: ['app-status'], delay: 5000 }, // 等待节点状态更新
         { components: ['all'], delay: 10000 } // 确保所有相关状态更新
       ]
+    },
+    'hyperpod-software-update': {
+      immediate: ['nodegroup-manager', 'cluster-status'],
+      delayed: [
+        { components: ['app-status', 'pods-services'], delay: 5000 }, // 等待集群状态更新
+        { components: ['all'], delay: 15000 } // 软件更新可能需要更长时间
+      ]
     }
   },
   

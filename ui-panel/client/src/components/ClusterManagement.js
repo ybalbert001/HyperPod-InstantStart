@@ -899,7 +899,7 @@ const ClusterManagement = () => {
                 label: (
                   <Space>
                     <PlusOutlined />
-                    <span>Create New Cluster</span>
+                    <span>Create New Pipeline</span>
                   </Space>
                 ),
                 children: (
