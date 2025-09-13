@@ -3768,10 +3768,27 @@ app.get('/api/cluster/nodegroups', async (req, res) => {
       const detailResult = await execAsync(detailCmd);
       const nodegroup = JSON.parse(detailResult.stdout).nodegroup;
       
+      // 获取实例类型，如果为null则从Launch Template获取
+      let instanceTypes = nodegroup.instanceTypes;
+      if (!instanceTypes || instanceTypes.length === 0) {
+        try {
+          if (nodegroup.launchTemplate && nodegroup.launchTemplate.id) {
+            const ltCmd = `aws ec2 describe-launch-template-versions --launch-template-id ${nodegroup.launchTemplate.id} --region ${region} --query 'LaunchTemplateVersions[0].LaunchTemplateData.InstanceType' --output json`;
+            const ltResult = await execAsync(ltCmd);
+            const instanceType = JSON.parse(ltResult.stdout);
+            if (instanceType) {
+              instanceTypes = [instanceType];
+            }
+          }
+        } catch (ltError) {
+          console.warn('Failed to get instance type from launch template:', ltError.message);
+        }
+      }
+      
       eksNodeGroups.push({
         name: nodegroup.nodegroupName,
         status: nodegroup.status,
-        instanceTypes: nodegroup.instanceTypes,
+        instanceTypes: instanceTypes || [],
         capacityType: nodegroup.capacityType,
         scalingConfig: nodegroup.scalingConfig,
         amiType: nodegroup.amiType,
