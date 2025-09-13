@@ -38,6 +38,7 @@ import {
 } from '@ant-design/icons';
 import globalRefreshManager from '../hooks/useGlobalRefresh';
 import operationRefreshManager from '../hooks/useOperationRefresh';
+import NodeGroupManager from './NodeGroupManager';
 
 const { Title, Text } = Typography;
 const { Step } = Steps;
@@ -698,170 +699,199 @@ const ClusterManagement = () => {
                   </Space>
                 ),
                 children: (
-                  <div>
-                    {/* 集群选择器和管理功能 */}
-                    <Row gutter={16} align="middle" style={{ marginBottom: 24 }}>
-                      <Col flex="auto">
-                        <Space direction="vertical" style={{ width: '100%' }}>
-                          {/* 集群列表刷新按钮 */}
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <Text strong>Active Cluster:</Text>
+                  <Row gutter={24} style={{ height: '100%' }}>
+                    {/* 左侧：集群选择和管理 */}
+                    <Col xs={24} lg={10}>
+                      <div>
+                        {/* 集群选择器和管理功能 */}
+                        <Row gutter={16} align="middle" style={{ marginBottom: 24 }}>
+                          <Col flex="auto">
+                            <Space direction="vertical" style={{ width: '100%' }}>
+                              {/* 集群列表刷新按钮 */}
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <Text strong>Active Cluster:</Text>
+                                <Button 
+                                  size="small"
+                                  icon={<ReloadOutlined />} 
+                                  onClick={fetchClusters}
+                                  loading={clustersLoading}
+                                  type="text"
+                                >
+                                  Refresh
+                                </Button>
+                              </div>
+                              <div>
+                                <Select
+                                  value={activeCluster}
+                                  onChange={switchCluster}
+                                  style={{ width: '100%' }}
+                                  placeholder="Select a cluster or import/create one"
+                                  loading={clustersLoading}
+                                  allowClear
+                                  showSearch
+                                  optionFilterProp="children"
+                                >
+                                  {clusters.map(cluster => (
+                                    <Option key={cluster.clusterTag} value={cluster.clusterTag}>
+                                      <Space>
+                                        <span>{cluster.clusterTag}</span>
+                                        <Tag color={cluster.type === 'imported' ? 'blue' : 'green'} size="small">
+                                          {cluster.type === 'imported' ? 'Imported' : 'Created'}
+                                        </Tag>
+                                        <Text type="secondary" style={{ fontSize: '12px' }}>
+                                          {new Date(cluster.lastModified).toLocaleDateString()}
+                                        </Text>
+                                      </Space>
+                                    </Option>
+                                  ))}
+                                </Select>
+                              </div>
+                              {activeCluster && (
+                                <Alert
+                                  message={`Currently managing cluster: ${activeCluster}`}
+                                  type="info"
+                                  showIcon
+                                  style={{ marginTop: 8 }}
+                                />
+                              )}
+                              {!activeCluster && clusters.length === 0 && (
+                                <Alert
+                                  message="No clusters found. Import an existing cluster or create a new one."
+                                  type="warning"
+                                  showIcon
+                                  style={{ marginTop: 8 }}
+                                />
+                              )}
+                            </Space>
+                          </Col>
+                          <Col>
+                            <Space direction="vertical" align="center">
+                              <Text type="secondary" style={{ fontSize: '12px' }}>
+                                Total Clusters
+                              </Text>
+                              <Tag color="blue" style={{ fontSize: '16px', padding: '4px 12px' }}>
+                                {clusters.length}
+                              </Tag>
+                            </Space>
+                          </Col>
+                        </Row>
+
+                        {/* 导入集群按钮 */}
+                        <Row style={{ marginBottom: 24 }}>
+                          <Col>
                             <Button 
-                              size="small"
-                              icon={<ReloadOutlined />} 
-                              onClick={fetchClusters}
-                              loading={clustersLoading}
-                              type="text"
+                              type="default"
+                              icon={<ImportOutlined />} 
+                              onClick={() => setShowImportModal(true)}
                             >
-                              Refresh
+                              Import Existing Cluster
                             </Button>
-                          </div>
-                          <div>
-                            <Select
-                              value={activeCluster}
-                              onChange={switchCluster}
-                              style={{ width: '100%' }}
-                              placeholder="Select a cluster or import/create one"
-                              loading={clustersLoading}
-                              allowClear
-                              showSearch
-                              optionFilterProp="children"
-                            >
-                              {clusters.map(cluster => (
-                                <Option key={cluster.clusterTag} value={cluster.clusterTag}>
-                                  <Space>
-                                    <span>{cluster.clusterTag}</span>
-                                    <Tag color={cluster.type === 'imported' ? 'blue' : 'green'} size="small">
-                                      {cluster.type === 'imported' ? 'Imported' : 'Created'}
-                                    </Tag>
-                                    <Text type="secondary" style={{ fontSize: '12px' }}>
-                                      {new Date(cluster.lastModified).toLocaleDateString()}
-                                    </Text>
-                                  </Space>
-                                </Option>
-                              ))}
-                            </Select>
-                          </div>
-                          {activeCluster && (
-                            <Alert
-                              message={`Currently managing cluster: ${activeCluster}`}
-                              type="info"
-                              showIcon
-                              style={{ marginTop: 8 }}
-                            />
-                          )}
-                          {!activeCluster && clusters.length === 0 && (
-                            <Alert
-                              message="No clusters found. Import an existing cluster or create a new one."
-                              type="warning"
-                              showIcon
-                              style={{ marginTop: 8 }}
-                            />
-                          )}
-                        </Space>
-                      </Col>
-                      <Col>
-                        <Space direction="vertical" align="center">
-                          <Text type="secondary" style={{ fontSize: '12px' }}>
-                            Total Clusters
-                          </Text>
-                          <Tag color="blue" style={{ fontSize: '16px', padding: '4px 12px' }}>
-                            {clusters.length}
-                          </Tag>
-                        </Space>
-                      </Col>
-                    </Row>
+                          </Col>
+                        </Row>
 
-                    {/* 导入集群按钮 */}
-                    <Row style={{ marginBottom: 24 }}>
-                      <Col>
-                        <Button 
-                          type="default"
-                          icon={<ImportOutlined />} 
-                          onClick={() => setShowImportModal(true)}
-                        >
-                          Import Existing Cluster
-                        </Button>
-                      </Col>
-                    </Row>
-
-                    {/* 集群信息显示 */}
-                    {activeCluster && (
-                      <Card title="Cluster Details" size="small">
-                        {(() => {
-                          const cluster = clusters.find(c => c.clusterTag === activeCluster);
-                          if (!cluster) return <Text type="secondary">Loading cluster information...</Text>;
-                          
-                          if (cluster.type === 'imported') {
-                            return (
-                              <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-                                <Row gutter={[16, 16]}>
-                                  <Col span={12}>
+                        {/* 集群信息显示 */}
+                        {activeCluster && (
+                          <Card title="Cluster Details" size="small">
+                            {(() => {
+                              const cluster = clusters.find(c => c.clusterTag === activeCluster);
+                              if (!cluster) return <Text type="secondary">Loading cluster information...</Text>;
+                              
+                              if (cluster.type === 'imported') {
+                                return (
+                                  <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                                    <Row gutter={[16, 16]}>
+                                      <Col span={12}>
+                                        <div>
+                                          <Text strong>EKS Cluster Name:</Text>
+                                          <br />
+                                          <Text code>{cluster.config?.eksClusterName || 'N/A'}</Text>
+                                        </div>
+                                      </Col>
+                                      <Col span={12}>
+                                        <div>
+                                          <Text strong>AWS Region:</Text>
+                                          <br />
+                                          <Text code>{cluster.config?.awsRegion || 'N/A'}</Text>
+                                        </div>
+                                      </Col>
+                                    </Row>
                                     <div>
-                                      <Text strong>EKS Cluster Name:</Text>
+                                      <Text strong>Tags:</Text>
                                       <br />
-                                      <Text code>{cluster.config?.eksClusterName || 'N/A'}</Text>
+                                      <Space>
+                                        <Tag color="blue">Imported</Tag>
+                                      </Space>
                                     </div>
-                                  </Col>
-                                  <Col span={12}>
-                                    <div>
-                                      <Text strong>AWS Region:</Text>
-                                      <br />
-                                      <Text code>{cluster.config?.awsRegion || 'N/A'}</Text>
-                                    </div>
-                                  </Col>
-                                </Row>
-                                <div>
-                                  <Text strong>Tags:</Text>
-                                  <br />
-                                  <Space>
-                                    <Tag color="blue">Imported</Tag>
                                   </Space>
-                                </div>
-                              </Space>
-                            );
-                          } else {
-                            return (
-                              <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-                                <Row gutter={[16, 16]}>
-                                  <Col span={12}>
+                                );
+                              } else {
+                                return (
+                                  <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                                    <Row gutter={[16, 16]}>
+                                      <Col span={12}>
+                                        <div>
+                                          <Text strong>Cluster Tag:</Text>
+                                          <br />
+                                          <Text code>{cluster.config?.clusterTag || 'N/A'}</Text>
+                                        </div>
+                                      </Col>
+                                      <Col span={12}>
+                                        <div>
+                                          <Text strong>AWS Region:</Text>
+                                          <br />
+                                          <Text code>{cluster.config?.awsRegion || 'N/A'}</Text>
+                                        </div>
+                                      </Col>
+                                    </Row>
+                                    <Row gutter={[16, 16]}>
+                                      <Col span={12}>
+                                        <div>
+                                          <Text strong>GPU Instance Type:</Text>
+                                          <br />
+                                          <Text code>{cluster.config?.gpuInstanceType || 'N/A'}</Text>
+                                        </div>
+                                      </Col>
+                                    </Row>
                                     <div>
-                                      <Text strong>Cluster Tag:</Text>
+                                      <Text strong>Tags:</Text>
                                       <br />
-                                      <Text code>{cluster.config?.clusterTag || 'N/A'}</Text>
+                                      <Space>
+                                        <Tag color="green">Created</Tag>
+                                      </Space>
                                     </div>
-                                  </Col>
-                                  <Col span={12}>
-                                    <div>
-                                      <Text strong>AWS Region:</Text>
-                                      <br />
-                                      <Text code>{cluster.config?.awsRegion || 'N/A'}</Text>
-                                    </div>
-                                  </Col>
-                                </Row>
-                                <Row gutter={[16, 16]}>
-                                  <Col span={12}>
-                                    <div>
-                                      <Text strong>GPU Instance Type:</Text>
-                                      <br />
-                                      <Text code>{cluster.config?.gpuInstanceType || 'N/A'}</Text>
-                                    </div>
-                                  </Col>
-                                </Row>
-                                <div>
-                                  <Text strong>Tags:</Text>
-                                  <br />
-                                  <Space>
-                                    <Tag color="green">Created</Tag>
                                   </Space>
-                                </div>
-                              </Space>
-                            );
-                          }
-                        })()}
-                      </Card>
-                    )}
-                  </div>
+                                );
+                              }
+                            })()}
+                          </Card>
+                        )}
+                      </div>
+                    </Col>
+                    
+                    {/* 右侧：Node Groups */}
+                    <Col xs={24} lg={14}>
+                      {activeCluster ? (
+                        <NodeGroupManager />
+                      ) : (
+                        <Card title="Node Groups" style={{ height: '100%' }}>
+                          <div style={{ 
+                            display: 'flex', 
+                            justifyContent: 'center', 
+                            alignItems: 'center', 
+                            height: '200px',
+                            flexDirection: 'column'
+                          }}>
+                            <Text type="secondary" style={{ fontSize: '16px', marginBottom: '8px' }}>
+                              No Active Cluster
+                            </Text>
+                            <Text type="secondary">
+                              Please select or import a cluster to view node groups
+                            </Text>
+                          </div>
+                        </Card>
+                      )}
+                    </Col>
+                  </Row>
                 )
               },
               {

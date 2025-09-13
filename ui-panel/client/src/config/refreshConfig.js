@@ -23,6 +23,7 @@ export const REFRESH_CONFIG = {
     'pods-services': 8,               // 高优先级 - Pods和Services数据
     'training-monitor': 8,            // 高优先级 - 训练监控
     'deployment-manager': 7,          // 高优先级 - 部署管理
+    'nodegroup-manager': 7,           // 高优先级 - 节点组管理
     's3-storage-manager': 6,          // 中高优先级 - S3存储管理
     'training-history': 6,            // 中高优先级 - 训练历史
     'status-monitor': 4,              // 中优先级 - 状态监控（已被app-status替代）
@@ -94,6 +95,13 @@ export const REFRESH_CONFIG = {
       delayed: [
         { components: ['cluster-status'], delay: 5000 }, // 等待K8s资源清理
         { components: ['all'], delay: 10000 } // 确保训练日志和历史记录更新
+      ]
+    },
+    'nodegroup-scale': {
+      immediate: ['nodegroup-manager', 'cluster-status', 'pods-services'],
+      delayed: [
+        { components: ['app-status'], delay: 5000 }, // 等待节点状态更新
+        { components: ['all'], delay: 10000 } // 确保所有相关状态更新
       ]
     }
   },

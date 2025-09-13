@@ -153,6 +153,15 @@ function App() {
             }
             break;
             
+          case 'nodegroup_updated':
+            if (data.status === 'success') {
+              message.success(data.message);
+              operationRefreshManager.triggerOperationRefresh('nodegroup-scale', data);
+            } else {
+              message.error(data.message);
+            }
+            break;
+            
           default:
             console.log('❓ Unknown message type:', data.type);
             break;

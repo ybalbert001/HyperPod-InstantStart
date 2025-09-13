@@ -3724,6 +3724,240 @@ app.get('/api/cluster/step1-status', (req, res) => multiClusterStatus.handleStep
 app.get('/api/cluster/step2-status', (req, res) => multiClusterStatus.handleStep2Status(req, res));
 app.get('/api/cluster/cloudformation-status', (req, res) => multiClusterStatus.handleCloudFormationStatus(req, res));
 
+// 节点组管理API
+app.get('/api/cluster/nodegroups', async (req, res) => {
+  try {
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    const fs = require('fs');
+    const path = require('path');
+    
+    const ClusterManager = require('./cluster-manager');
+    const clusterManager = new ClusterManager();
+    const activeClusterName = clusterManager.getActiveCluster();
+    
+    if (!activeClusterName) {
+      return res.status(400).json({ error: 'No active cluster found' });
+    }
+
+    // 读取集群配置文件
+    const configDir = clusterManager.getClusterConfigDir(activeClusterName);
+    const initEnvsPath = path.join(configDir, 'init_envs');
+    
+    if (!fs.existsSync(initEnvsPath)) {
+      return res.status(400).json({ error: 'Cluster configuration file not found' });
+    }
+
+    // 解析init_envs文件
+    const initEnvsContent = fs.readFileSync(initEnvsPath, 'utf8');
+    const eksClusterMatch = initEnvsContent.match(/export EKS_CLUSTER_NAME[="]([^"]+)["]/);
+    const regionMatch = initEnvsContent.match(/export AWS_REGION[="]([^"]+)["]/);
+    
+    const clusterName = eksClusterMatch ? eksClusterMatch[1] : activeClusterName;
+    const region = regionMatch ? regionMatch[1] : 'us-west-2';
+    
+    // 获取EKS节点组
+    const eksCmd = `aws eks list-nodegroups --cluster-name ${clusterName} --region ${region} --output json`;
+    const eksResult = await execAsync(eksCmd);
+    const eksData = JSON.parse(eksResult.stdout);
+    
+    const eksNodeGroups = [];
+    for (const nodegroupName of eksData.nodegroups || []) {
+      const detailCmd = `aws eks describe-nodegroup --cluster-name ${clusterName} --nodegroup-name ${nodegroupName} --region ${region} --output json`;
+      const detailResult = await execAsync(detailCmd);
+      const nodegroup = JSON.parse(detailResult.stdout).nodegroup;
+      
+      eksNodeGroups.push({
+        name: nodegroup.nodegroupName,
+        status: nodegroup.status,
+        instanceTypes: nodegroup.instanceTypes,
+        capacityType: nodegroup.capacityType,
+        scalingConfig: nodegroup.scalingConfig,
+        amiType: nodegroup.amiType,
+        subnets: nodegroup.subnets,
+        nodeRole: nodegroup.nodeRole
+      });
+    }
+    
+    // 获取HyperPod实例组
+    const hyperPodGroups = [];
+    try {
+      const hpClusterName = clusterName.replace('eks-cluster-', 'hp-cluster-');
+      const hpCmd = `aws sagemaker describe-cluster --cluster-name ${hpClusterName} --region ${region} --output json`;
+      const hpResult = await execAsync(hpCmd);
+      const hpData = JSON.parse(hpResult.stdout);
+      
+      for (const instanceGroup of hpData.InstanceGroups || []) {
+        hyperPodGroups.push({
+          name: instanceGroup.InstanceGroupName,
+          status: instanceGroup.Status,
+          instanceType: instanceGroup.InstanceType,
+          currentCount: instanceGroup.CurrentCount,
+          targetCount: instanceGroup.TargetCount,
+          executionRole: instanceGroup.ExecutionRole
+        });
+      }
+    } catch (hpError) {
+      console.log('No HyperPod cluster found or error:', hpError.message);
+    }
+    
+    res.json({
+      eksNodeGroups,
+      hyperPodInstanceGroups: hyperPodGroups
+    });
+  } catch (error) {
+    console.error('Error fetching node groups:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/cluster/nodegroups/:name/scale', async (req, res) => {
+  try {
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    const fs = require('fs');
+    const path = require('path');
+    
+    const { name } = req.params;
+    const { minSize, maxSize, desiredSize } = req.body;
+    
+    const ClusterManager = require('./cluster-manager');
+    const clusterManager = new ClusterManager();
+    const activeClusterName = clusterManager.getActiveCluster();
+    
+    if (!activeClusterName) {
+      return res.status(400).json({ error: 'No active cluster found' });
+    }
+
+    // 读取集群配置文件
+    const configDir = clusterManager.getClusterConfigDir(activeClusterName);
+    const initEnvsPath = path.join(configDir, 'init_envs');
+    
+    if (!fs.existsSync(initEnvsPath)) {
+      return res.status(400).json({ error: 'Cluster configuration file not found' });
+    }
+
+    // 解析init_envs文件
+    const initEnvsContent = fs.readFileSync(initEnvsPath, 'utf8');
+    const eksClusterMatch = initEnvsContent.match(/export EKS_CLUSTER_NAME[="]([^"]+)["]/);
+    const regionMatch = initEnvsContent.match(/export AWS_REGION[="]([^"]+)["]/);
+    
+    const clusterName = eksClusterMatch ? eksClusterMatch[1] : activeClusterName;
+    const region = regionMatch ? regionMatch[1] : 'us-west-2';
+    
+    const cmd = `aws eks update-nodegroup-config --cluster-name ${clusterName} --nodegroup-name ${name} --scaling-config minSize=${minSize},maxSize=${maxSize},desiredSize=${desiredSize} --region ${region}`;
+    
+    await execAsync(cmd);
+    
+    // WebSocket通知
+    broadcast({
+      type: 'nodegroup_updated',
+      status: 'success',
+      message: `EKS node group ${name} scaling updated successfully`
+    });
+    
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error updating EKS node group:', error);
+    broadcast({
+      type: 'nodegroup_updated',
+      status: 'error',
+      message: `Failed to update EKS node group: ${error.message}`
+    });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/cluster/hyperpod/instances/:name/scale', async (req, res) => {
+  try {
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    const fs = require('fs');
+    const path = require('path');
+    
+    const { name } = req.params;
+    const { targetCount } = req.body;
+    
+    const ClusterManager = require('./cluster-manager');
+    const clusterManager = new ClusterManager();
+    const activeClusterName = clusterManager.getActiveCluster();
+    
+    if (!activeClusterName) {
+      return res.status(400).json({ error: 'No active cluster found' });
+    }
+
+    // 读取集群配置文件
+    const configDir = clusterManager.getClusterConfigDir(activeClusterName);
+    const initEnvsPath = path.join(configDir, 'init_envs');
+    
+    if (!fs.existsSync(initEnvsPath)) {
+      return res.status(400).json({ error: 'Cluster configuration file not found' });
+    }
+
+    // 解析init_envs文件
+    const initEnvsContent = fs.readFileSync(initEnvsPath, 'utf8');
+    const eksClusterMatch = initEnvsContent.match(/export EKS_CLUSTER_NAME[="]([^"]+)["]/);
+    const regionMatch = initEnvsContent.match(/export AWS_REGION[="]([^"]+)["]/);
+    
+    const clusterName = eksClusterMatch ? eksClusterMatch[1] : activeClusterName;
+    const region = regionMatch ? regionMatch[1] : 'us-west-2';
+    const hpClusterName = clusterName.replace('eks-cluster-', 'hp-cluster-');
+    
+    // HyperPod需要完整的实例组配置，不能只更新InstanceCount
+    // 我们需要先获取当前配置，然后更新InstanceCount
+    const getCmd = `aws sagemaker describe-cluster --cluster-name ${hpClusterName} --region ${region}`;
+    const getResult = await execAsync(getCmd);
+    const clusterData = JSON.parse(getResult.stdout);
+    
+    // 找到要更新的实例组
+    const instanceGroup = clusterData.InstanceGroups.find(ig => ig.InstanceGroupName === name);
+    if (!instanceGroup) {
+      throw new Error(`Instance group ${name} not found`);
+    }
+    
+    // 构建更新命令，使用完整的实例组配置
+    const updateInstanceGroup = {
+      InstanceGroupName: instanceGroup.InstanceGroupName,
+      InstanceType: instanceGroup.InstanceType,
+      InstanceCount: targetCount,
+      ExecutionRole: instanceGroup.ExecutionRole,
+      LifeCycleConfig: instanceGroup.LifeCycleConfig
+    };
+    
+    // 添加可选参数
+    if (instanceGroup.ThreadsPerCore) {
+      updateInstanceGroup.ThreadsPerCore = instanceGroup.ThreadsPerCore;
+    }
+    if (instanceGroup.InstanceStorageConfigs) {
+      updateInstanceGroup.InstanceStorageConfigs = instanceGroup.InstanceStorageConfigs;
+    }
+    
+    const cmd = `aws sagemaker update-cluster --cluster-name ${hpClusterName} --instance-groups '${JSON.stringify(updateInstanceGroup)}' --region ${region}`;
+    
+    await execAsync(cmd);
+    
+    // WebSocket通知
+    broadcast({
+      type: 'nodegroup_updated',
+      status: 'success',
+      message: `HyperPod instance group ${name} scaling updated successfully`
+    });
+    
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error updating HyperPod instance group:', error);
+    broadcast({
+      type: 'nodegroup_updated',
+      status: 'error',
+      message: `Failed to update HyperPod instance group: ${error.message}`
+    });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 console.log('Multi-cluster management APIs loaded');
 
 app.listen(PORT, () => {
