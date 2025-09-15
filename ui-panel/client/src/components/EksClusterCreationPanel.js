@@ -432,6 +432,11 @@ const EksClusterCreationPanel = () => {
                       description: 'Ready to create infrastructure'
                     },
                     {
+                      title: 'Configuring Dependencies',
+                      status: 'wait',
+                      description: 'Ready to install cluster dependencies'
+                    },
+                    {
                       title: 'Registering Cluster',
                       status: 'wait',
                       description: 'Ready to add to cluster management'
