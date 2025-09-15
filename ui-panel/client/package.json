@@ -9,6 +9,7 @@
     "@testing-library/user-event": "^14.5.2",
     "antd": "^5.12.8",
     "axios": "^1.6.2",
+    "env-cmd": "^10.1.0",
     "http-proxy-middleware": "^3.0.5",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -17,7 +18,7 @@
     "yaml": "^2.3.4"
   },
   "scripts": {
-    "start": "HOST=0.0.0.0 PORT=3099 react-scripts start",
+    "start": "env-cmd -f user.env react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject"

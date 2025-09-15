@@ -21,16 +21,14 @@ docker stop $LOCAL_IMAGE 2>/dev/null || true
 docker rm $LOCAL_IMAGE 2>/dev/null || true
 
 
-if ! docker images | grep -q $LOCAL_IMAGE; then
-    echo "📥 Trying to pull from remote repository..."
-    if docker pull $REMOTE_REPO; then
-        echo "✅ Successfully pulled from remote repository"
-        docker tag $REMOTE_REPO $LOCAL_IMAGE
-        echo "🏷️ Tagged as $LOCAL_IMAGE"
-    else
-        echo "🔧 Failed to pull from remote repository, building locally..."
-        docker build -f Dockerfile.dev -t $LOCAL_IMAGE .
-    fi
+echo "📥 Trying to pull from remote repository..."
+if docker pull $REMOTE_REPO; then
+    echo "✅ Successfully pulled from remote repository"
+    docker tag $REMOTE_REPO $LOCAL_IMAGE
+    echo "🏷️ Tagged as $LOCAL_IMAGE"
+else
+    echo "🔧 Failed to pull from remote repository, building locally..."
+    docker build -f Dockerfile.dev -t $LOCAL_IMAGE .
 fi
 
 # 确保本地目录权限
@@ -43,9 +41,11 @@ docker run -d \
   --name $LOCAL_IMAGE \
   --network host \
   --user 1000:1000 \
+  -v $(pwd)/..:/app/hyperpod-instantstart \
   -v $(pwd)/server:/app/server \
   -v $(pwd)/client/src:/app/client/src \
   -v $(pwd)/client/public:/app/client/public \
+  -v $(pwd)/client/user.env:/app/client/user.env \
   -v $(pwd)/templates:/app/templates \
   -v $(pwd)/deployments:/app/deployments \
   -v $(pwd)/config:/app/config \
@@ -53,7 +53,6 @@ docker run -d \
   -v $(pwd)/tmp:/app/tmp \
   -v $(pwd)/mlflow:/app/mlflow \
   -v $(pwd)/managed_clusters_info:/app/managed_clusters_info \
-  -v $(pwd)/container-entrypoint.sh:/app/container-entrypoint.sh \
   -v $(pwd)/.env:/app/.env \
   -v $(pwd)/package.json:/app/package.json \
   -v $(pwd)/nodemon.json:/app/nodemon.json \

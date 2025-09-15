@@ -7,7 +7,7 @@ export GPU_INSTANCE_COUNT=2
 
 # Automatic fill
 export CLOUD_FORMATION_FULL_STACK_NAME=full-stack-$CLUSTER_TAG
-export EKS_CLUSTER_NAME=eks-cluster-$CLUSTER_TAG
+export EKS_CLUSTER_NAME=eks-$CLUSTER_TAG
 export HP_CLUSTER_NAME=hp-cluster-$CLUSTER_TAG
 export MLFLOW_SERVER_NAME=mlflow-server-$CLUSTER_TAG
 export DEPLOY_MODEL_S3_BUCKET=cluster-mount-$CLUSTER_TAG

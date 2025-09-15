@@ -1,0 +1,182 @@
+/**
+ * CIDR生成工具模块
+ * 基于原bash脚本逻辑，提供VPC和子网CIDR的自动生成功能
+ */
+
+const { execSync } = require('child_process');
+
+class CidrGenerator {
+  /**
+   * 生成唯一的VPC CIDR，避免与现有VPC冲突
+   * @param {string} region - AWS区域
+   * @param {string} excludeCidr - 需要排除的CIDR
+   * @returns {Promise<string>} 可用的VPC CIDR
+   */
+  static async generateUniqueCidr(region, excludeCidr = null) {
+    try {
+      // 获取现有VPC的CIDR
+      const existingCidrs = await this.getExistingVpcCidrs(region);
+      
+      // 候选CIDR列表 (基于原脚本逻辑)
+      const candidates = [
+        ...this.range(90, 99),   // 10.90-99.0.0/16
+        ...this.range(100, 110), // 10.100-110.0.0/16
+        ...this.range(120, 130), // 10.120-130.0.0/16
+        ...this.range(150, 160), // 10.150-160.0.0/16
+        ...this.range(180, 190)  // 10.180-190.0.0/16
+      ];
+      
+      // 查找无冲突的CIDR
+      for (const i of candidates) {
+        const candidate = `10.${i}.0.0/16`;
+        if (!existingCidrs.includes(candidate) && candidate !== excludeCidr) {
+          return candidate;
+        }
+      }
+      
+      // 默认fallback
+      return "10.200.0.0/16";
+    } catch (error) {
+      console.error('Error generating unique CIDR:', error);
+      return "10.200.0.0/16";
+    }
+  }
+
+  /**
+   * 基于VPC CIDR生成所有子网CIDR
+   * @param {string} vpcCidr - VPC CIDR (如: 10.100.0.0/16)
+   * @param {string} region - AWS区域
+   * @returns {Promise<Object>} 完整的CIDR配置
+   */
+  static async generateSubnetCidrs(vpcCidr, region) {
+    try {
+      // 解析VPC CIDR
+      const [o1, o2] = vpcCidr.split('.').slice(0, 2);
+      
+      // 为HyperPod生成独立的CIDR
+      const hyperPodPrivateSubnetCidr = await this.generateUniqueCidr(region, vpcCidr);
+      
+      return {
+        vpcCidr,
+        publicSubnet1Cidr: `${o1}.${o2}.10.0/24`,
+        publicSubnet2Cidr: `${o1}.${o2}.11.0/24`,
+        eksPrivateSubnet1Cidr: `${o1}.${o2}.7.0/28`,
+        eksPrivateSubnet2Cidr: `${o1}.${o2}.8.0/28`,
+        hyperPodPrivateSubnetCidr
+      };
+    } catch (error) {
+      console.error('Error generating subnet CIDRs:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 验证CIDR格式是否正确
+   * @param {string} cidr - CIDR字符串
+   * @returns {boolean} 是否有效
+   */
+  static validateCidrFormat(cidr) {
+    const cidrRegex = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/;
+    if (!cidrRegex.test(cidr)) return false;
+    
+    const [ip, prefix] = cidr.split('/');
+    const octets = ip.split('.').map(Number);
+    
+    // 验证IP地址范围
+    if (octets.some(octet => octet < 0 || octet > 255)) return false;
+    
+    // 验证前缀长度
+    const prefixNum = parseInt(prefix);
+    if (prefixNum < 0 || prefixNum > 32) return false;
+    
+    return true;
+  }
+
+  /**
+   * 检查CIDR是否与现有CIDR冲突
+   * @param {string} cidr - 要检查的CIDR
+   * @param {string} region - AWS区域
+   * @returns {Promise<boolean>} 是否冲突
+   */
+  static async checkCidrConflict(cidr, region) {
+    try {
+      const existingCidrs = await this.getExistingVpcCidrs(region);
+      return existingCidrs.includes(cidr);
+    } catch (error) {
+      console.error('Error checking CIDR conflict:', error);
+      return true; // 出错时假设冲突，保证安全
+    }
+  }
+
+  /**
+   * 获取指定区域现有VPC的CIDR列表
+   * @param {string} region - AWS区域
+   * @returns {Promise<string[]>} CIDR列表
+   */
+  static async getExistingVpcCidrs(region) {
+    try {
+      const command = `aws ec2 describe-vpcs --region ${region} --query 'Vpcs[].CidrBlock' --output text`;
+      const result = execSync(command, { encoding: 'utf8' });
+      
+      return result.trim().split(/\s+/).filter(cidr => cidr && cidr !== 'None');
+    } catch (error) {
+      console.error('Error getting existing VPC CIDRs:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 生成数字范围数组
+   * @param {number} start - 起始数字
+   * @param {number} end - 结束数字
+   * @returns {number[]} 数字数组
+   */
+  static range(start, end) {
+    return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+  }
+
+  /**
+   * 生成完整的CIDR配置（一站式方法）
+   * @param {string} region - AWS区域
+   * @param {string} customVpcCidr - 用户自定义VPC CIDR（可选）
+   * @returns {Promise<Object>} 完整CIDR配置
+   */
+  static async generateFullCidrConfiguration(region, customVpcCidr = null) {
+    try {
+      let vpcCidr;
+      
+      if (customVpcCidr) {
+        // 验证用户提供的CIDR
+        if (!this.validateCidrFormat(customVpcCidr)) {
+          throw new Error(`Invalid CIDR format: ${customVpcCidr}`);
+        }
+        
+        // 检查冲突
+        const hasConflict = await this.checkCidrConflict(customVpcCidr, region);
+        if (hasConflict) {
+          throw new Error(`CIDR conflicts with existing VPC: ${customVpcCidr}`);
+        }
+        
+        vpcCidr = customVpcCidr;
+      } else {
+        // 自动生成VPC CIDR
+        vpcCidr = await this.generateUniqueCidr(region);
+      }
+      
+      // 生成所有子网CIDR
+      const cidrConfig = await this.generateSubnetCidrs(vpcCidr, region);
+      
+      return {
+        ...cidrConfig,
+        generatedAt: new Date().toISOString(),
+        region,
+        autoGenerated: !customVpcCidr
+      };
+    } catch (error) {
+      console.error('Error generating full CIDR configuration:', error);
+      throw error;
+    }
+  }
+}
+
+module.exports = CidrGenerator;

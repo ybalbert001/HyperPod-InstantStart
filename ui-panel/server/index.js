@@ -3749,13 +3749,15 @@ app.get('/api/cluster/nodegroups', async (req, res) => {
       return res.status(400).json({ error: 'Cluster configuration file not found' });
     }
 
-    // 解析init_envs文件
-    const initEnvsContent = fs.readFileSync(initEnvsPath, 'utf8');
-    const eksClusterMatch = initEnvsContent.match(/export EKS_CLUSTER_NAME[="]([^"]+)["]/);
-    const regionMatch = initEnvsContent.match(/export AWS_REGION[="]([^"]+)["]/);
+    // 解析init_envs文件 - 使用shell source方式
+    const getEnvVar = async (varName) => {
+      const cmd = `source ${initEnvsPath} && echo $${varName}`;
+      const result = await execAsync(cmd, { shell: '/bin/bash' });
+      return result.stdout.trim();
+    };
     
-    const clusterName = eksClusterMatch ? eksClusterMatch[1] : activeClusterName;
-    const region = regionMatch ? regionMatch[1] : 'us-west-2';
+    const clusterName = await getEnvVar('EKS_CLUSTER_NAME') || activeClusterName;
+    const region = await getEnvVar('AWS_REGION') || 'us-west-2';
     
     // 获取EKS节点组
     const eksCmd = `aws eks list-nodegroups --cluster-name ${clusterName} --region ${region} --output json`;
@@ -3858,13 +3860,15 @@ app.put('/api/cluster/nodegroups/:name/scale', async (req, res) => {
       return res.status(400).json({ error: 'Cluster configuration file not found' });
     }
 
-    // 解析init_envs文件
-    const initEnvsContent = fs.readFileSync(initEnvsPath, 'utf8');
-    const eksClusterMatch = initEnvsContent.match(/export EKS_CLUSTER_NAME[="]([^"]+)["]/);
-    const regionMatch = initEnvsContent.match(/export AWS_REGION[="]([^"]+)["]/);
+    // 解析init_envs文件 - 使用shell source方式
+    const getEnvVar = async (varName) => {
+      const cmd = `source ${initEnvsPath} && echo $${varName}`;
+      const result = await execAsync(cmd, { shell: '/bin/bash' });
+      return result.stdout.trim();
+    };
     
-    const clusterName = eksClusterMatch ? eksClusterMatch[1] : activeClusterName;
-    const region = regionMatch ? regionMatch[1] : 'us-west-2';
+    const clusterName = await getEnvVar('EKS_CLUSTER_NAME') || activeClusterName;
+    const region = await getEnvVar('AWS_REGION') || 'us-west-2';
     
     const cmd = `aws eks update-nodegroup-config --cluster-name ${clusterName} --nodegroup-name ${name} --scaling-config minSize=${minSize},maxSize=${maxSize},desiredSize=${desiredSize} --region ${region}`;
     
@@ -3916,13 +3920,15 @@ app.put('/api/cluster/hyperpod/instances/:name/scale', async (req, res) => {
       return res.status(400).json({ error: 'Cluster configuration file not found' });
     }
 
-    // 解析init_envs文件
-    const initEnvsContent = fs.readFileSync(initEnvsPath, 'utf8');
-    const eksClusterMatch = initEnvsContent.match(/export EKS_CLUSTER_NAME[="]([^"]+)["]/);
-    const regionMatch = initEnvsContent.match(/export AWS_REGION[="]([^"]+)["]/);
+    // 解析init_envs文件 - 使用shell source方式
+    const getEnvVar = async (varName) => {
+      const cmd = `source ${initEnvsPath} && echo $${varName}`;
+      const result = await execAsync(cmd, { shell: '/bin/bash' });
+      return result.stdout.trim();
+    };
     
-    const clusterName = eksClusterMatch ? eksClusterMatch[1] : activeClusterName;
-    const region = regionMatch ? regionMatch[1] : 'us-west-2';
+    const clusterName = await getEnvVar('EKS_CLUSTER_NAME') || activeClusterName;
+    const region = await getEnvVar('AWS_REGION') || 'us-west-2';
     const hpClusterName = clusterName.replace('eks-cluster-', 'hp-cluster-');
     
     // HyperPod需要完整的实例组配置，不能只更新InstanceCount
@@ -4003,10 +4009,14 @@ app.post('/api/cluster/hyperpod/update-software', async (req, res) => {
       return res.status(400).json({ error: 'Cluster configuration file not found' });
     }
 
-    // 解析init_envs文件
-    const initEnvsContent = fs.readFileSync(initEnvsPath, 'utf8');
-    const regionMatch = initEnvsContent.match(/export AWS_REGION[="]([^"]+)["]/);
-    const region = regionMatch ? regionMatch[1] : 'us-west-2';
+    // 解析init_envs文件 - 使用shell source方式
+    const getEnvVar = async (varName) => {
+      const cmd = `source ${initEnvsPath} && echo $${varName}`;
+      const result = await execAsync(cmd, { shell: '/bin/bash' });
+      return result.stdout.trim();
+    };
+    
+    const region = await getEnvVar('AWS_REGION') || 'us-west-2';
 
     // 执行update-cluster-software命令
     const updateCmd = `aws sagemaker update-cluster-software --cluster-name ${clusterArn} --region ${region}`;
@@ -4035,6 +4045,581 @@ app.post('/api/cluster/hyperpod/update-software', async (req, res) => {
 });
 
 console.log('Multi-cluster management APIs loaded');
+
+// 引入CIDR生成工具
+const CidrGenerator = require('./utils/cidrGenerator');
+const CloudFormationManager = require('./utils/cloudFormationManager');
+const ClusterDependencyManager = require('./utils/clusterDependencyManager');
+const ClusterManager = require('./cluster-manager');
+const clusterManager = new ClusterManager();
+
+// CIDR生成相关API
+app.get('/api/cluster/generate-cidr', async (req, res) => {
+  try {
+    const { region, excludeCidr } = req.query;
+    
+    if (!region) {
+      return res.status(400).json({ error: 'AWS region is required' });
+    }
+    
+    const cidr = await CidrGenerator.generateUniqueCidr(region, excludeCidr);
+    
+    res.json({
+      success: true,
+      cidr,
+      region,
+      generatedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error generating CIDR:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 生成完整CIDR配置
+app.post('/api/cluster/generate-cidr-config', async (req, res) => {
+  try {
+    const { region, customVpcCidr } = req.body;
+    
+    if (!region) {
+      return res.status(400).json({ error: 'AWS region is required' });
+    }
+    
+    const cidrConfig = await CidrGenerator.generateFullCidrConfiguration(region, customVpcCidr);
+    
+    res.json({
+      success: true,
+      ...cidrConfig
+    });
+  } catch (error) {
+    console.error('Error generating CIDR configuration:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 验证CIDR格式和冲突
+app.post('/api/cluster/validate-cidr', async (req, res) => {
+  try {
+    const { cidr, region } = req.body;
+    
+    if (!cidr || !region) {
+      return res.status(400).json({ error: 'CIDR and region are required' });
+    }
+    
+    // 验证格式
+    const isValidFormat = CidrGenerator.validateCidrFormat(cidr);
+    if (!isValidFormat) {
+      return res.json({
+        success: false,
+        valid: false,
+        error: 'Invalid CIDR format'
+      });
+    }
+    
+    // 检查冲突
+    const hasConflict = await CidrGenerator.checkCidrConflict(cidr, region);
+    
+    res.json({
+      success: true,
+      valid: !hasConflict,
+      conflict: hasConflict,
+      message: hasConflict ? 'CIDR conflicts with existing VPC' : 'CIDR is available'
+    });
+  } catch (error) {
+    console.error('Error validating CIDR:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+console.log('CIDR generation APIs loaded');
+
+// EKS集群创建相关API
+app.post('/api/cluster/create-eks', async (req, res) => {
+  try {
+    const { clusterTag, awsRegion, customVpcCidr } = req.body;
+    
+    // 验证必填字段
+    if (!clusterTag || !awsRegion) {
+      return res.status(400).json({ error: 'Missing required fields: clusterTag and awsRegion' });
+    }
+    
+    // 生成CIDR配置
+    const cidrConfig = await CidrGenerator.generateFullCidrConfiguration(awsRegion, customVpcCidr);
+    
+    // 立即创建集群目录和状态记录（在CloudFormation调用前）
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const stackName = `full-stack-${clusterTag}-${timestamp}`;
+    
+    const clusterConfig = {
+      clusterTag,
+      awsRegion,
+      customVpcCidr: customVpcCidr || 'auto-generated'
+    };
+    
+    // 创建集群目录结构
+    clusterManager.createClusterDirs(clusterTag);
+    
+    // 立即保存用户输入和CIDR配置
+    const metadataDir = clusterManager.getClusterMetadataDir(clusterTag);
+    const fs = require('fs');
+    const path = require('path');
+    
+    // 添加到creating-clusters跟踪文件
+    const creatingClustersPath = path.join(__dirname, '../managed_clusters_info/creating-clusters.json');
+    let creatingClusters = {};
+    if (fs.existsSync(creatingClustersPath)) {
+      creatingClusters = JSON.parse(fs.readFileSync(creatingClustersPath, 'utf8'));
+    }
+    creatingClusters[clusterTag] = {
+      type: 'eks',
+      status: 'IN_PROGRESS',
+      createdAt: new Date().toISOString(),
+      stackName: stackName,
+      region: awsRegion
+    };
+    fs.writeFileSync(creatingClustersPath, JSON.stringify(creatingClusters, null, 2));
+    
+    // 保存用户输入信息
+    fs.writeFileSync(
+      path.join(metadataDir, 'user_input.json'),
+      JSON.stringify({
+        clusterTag,
+        awsRegion,
+        customVpcCidr: customVpcCidr || null,
+        inputAt: new Date().toISOString()
+      }, null, 2)
+    );
+    
+    // 保存CIDR配置
+    fs.writeFileSync(
+      path.join(metadataDir, 'cidr_configuration.json'),
+      JSON.stringify(cidrConfig, null, 2)
+    );
+    
+    // 保存创建状态
+    fs.writeFileSync(
+      path.join(metadataDir, 'creation_status.json'),
+      JSON.stringify({
+        status: 'IN_PROGRESS',
+        createdAt: new Date().toISOString(),
+        lastUpdated: new Date().toISOString(),
+        stackName: stackName,
+        region: awsRegion,
+        phase: 'CLOUDFORMATION_CREATING'
+      }, null, 2)
+    );
+    
+    // 创建CloudFormation Stack
+    const stackResult = await CloudFormationManager.createStack({
+      clusterTag,
+      awsRegion,
+      stackName
+    }, cidrConfig);
+    
+    // 更新创建状态，添加Stack ID
+    fs.writeFileSync(
+      path.join(metadataDir, 'creation_status.json'),
+      JSON.stringify({
+        status: 'IN_PROGRESS',
+        createdAt: new Date().toISOString(),
+        lastUpdated: new Date().toISOString(),
+        stackName: stackName,
+        stackId: stackResult.stackId,
+        region: awsRegion,
+        phase: 'CLOUDFORMATION_IN_PROGRESS'
+      }, null, 2)
+    );
+    
+    // 更新creating-clusters跟踪文件
+    creatingClusters[clusterTag].stackId = stackResult.stackId;
+    creatingClusters[clusterTag].phase = 'CLOUDFORMATION_IN_PROGRESS';
+    creatingClusters[clusterTag].lastUpdated = new Date().toISOString();
+    fs.writeFileSync(creatingClustersPath, JSON.stringify(creatingClusters, null, 2));
+    
+    await clusterManager.saveCreationConfig(clusterTag, clusterConfig, cidrConfig, stackResult);
+    
+    // 发送WebSocket通知
+    broadcast({
+      type: 'cluster_creation_started',
+      status: 'success',
+      message: `EKS cluster creation started: ${clusterTag}`,
+      clusterTag,
+      stackName: stackResult.stackName
+    });
+    
+    res.json({
+      success: true,
+      clusterTag,
+      stackName: stackResult.stackName,
+      stackId: stackResult.stackId,
+      cidrConfig,
+      message: 'EKS cluster creation started successfully'
+    });
+  } catch (error) {
+    console.error('Error creating EKS cluster:', error);
+    
+    broadcast({
+      type: 'cluster_creation_started',
+      status: 'error',
+      message: `Failed to create EKS cluster: ${error.message}`
+    });
+    
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 辅助函数：更新creating-clusters状态
+function updateCreatingClustersStatus(clusterTag, status, additionalData = {}) {
+  const fs = require('fs');
+  const path = require('path');
+  const creatingClustersPath = path.join(__dirname, '../managed_clusters_info/creating-clusters.json');
+  
+  let creatingClusters = {};
+  if (fs.existsSync(creatingClustersPath)) {
+    creatingClusters = JSON.parse(fs.readFileSync(creatingClustersPath, 'utf8'));
+  }
+  
+  if (creatingClusters[clusterTag]) {
+    if (status === 'COMPLETED' || status === 'FAILED') {
+      // 创建完成或失败，从跟踪文件中移除
+      delete creatingClusters[clusterTag];
+    } else {
+      // 更新状态
+      creatingClusters[clusterTag] = {
+        ...creatingClusters[clusterTag],
+        status: status,
+        lastUpdated: new Date().toISOString(),
+        ...additionalData
+      };
+    }
+    fs.writeFileSync(creatingClustersPath, JSON.stringify(creatingClusters, null, 2));
+  }
+}
+
+// 获取正在创建的集群列表
+app.get('/api/cluster/creating-clusters', async (req, res) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const creatingClustersPath = path.join(__dirname, '../managed_clusters_info/creating-clusters.json');
+    
+    if (!fs.existsSync(creatingClustersPath)) {
+      return res.json({ success: true, clusters: {} });
+    }
+    
+    const creatingClusters = JSON.parse(fs.readFileSync(creatingClustersPath, 'utf8'));
+    const clustersToCleanup = [];
+    
+    // 为每个创建中的集群获取最新状态
+    for (const [clusterTag, clusterInfo] of Object.entries(creatingClusters)) {
+      if (clusterInfo.type === 'eks' && clusterInfo.stackName) {
+        try {
+          const stackStatus = await CloudFormationManager.getStackStatus(clusterInfo.stackName, clusterInfo.region);
+          clusterInfo.currentStackStatus = stackStatus.stackStatus;
+          
+          // 如果创建完成或失败，更新状态
+          if (stackStatus.stackStatus === 'CREATE_COMPLETE') {
+            // 先更新状态为配置依赖阶段
+            updateCreatingClustersStatus(clusterTag, 'CONFIGURING_DEPENDENCIES');
+            
+            // 配置集群依赖（helm等）
+            await configureClusterDependencies(clusterTag);
+            
+            // 配置完成后，注册集群到可选列表
+            await registerCompletedCluster(clusterTag);
+          } else if (stackStatus.stackStatus.includes('FAILED') || stackStatus.stackStatus.includes('ROLLBACK')) {
+            updateCreatingClustersStatus(clusterTag, 'FAILED', { error: stackStatus.stackStatusReason });
+          }
+        } catch (error) {
+          console.error(`Error checking status for cluster ${clusterTag}:`, error);
+          
+          // 如果CloudFormation Stack不存在（被手动删除），标记为需要清理
+          if (error.message.includes('does not exist') || error.message.includes('ValidationError')) {
+            console.log(`CloudFormation stack ${clusterInfo.stackName} no longer exists, cleaning up metadata`);
+            clustersToCleanup.push(clusterTag);
+          }
+        }
+      }
+    }
+    
+    // 清理本地metadata
+    for (const clusterTag of clustersToCleanup) {
+      cleanupCreatingMetadata(clusterTag);
+    }
+    
+    // 重新读取清理后的状态
+    const updatedCreatingClusters = fs.existsSync(creatingClustersPath) 
+      ? JSON.parse(fs.readFileSync(creatingClustersPath, 'utf8'))
+      : {};
+    
+    res.json({ success: true, clusters: updatedCreatingClusters });
+  } catch (error) {
+    console.error('Error getting creating clusters:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 配置集群依赖（helm等）
+async function configureClusterDependencies(clusterTag) {
+  try {
+    console.log(`Configuring dependencies for cluster: ${clusterTag}`);
+    
+    // 使用ClusterDependencyManager进行配置
+    await ClusterDependencyManager.configureClusterDependencies(clusterTag, clusterManager);
+    
+    console.log(`Successfully configured dependencies for cluster: ${clusterTag}`);
+    
+    // 更新状态为完成
+    updateCreatingClustersStatus(clusterTag, 'COMPLETED');
+    
+  } catch (error) {
+    console.error(`Error configuring dependencies for cluster ${clusterTag}:`, error);
+    updateCreatingClustersStatus(clusterTag, 'DEPENDENCY_CONFIG_FAILED', { error: error.message });
+    throw error;
+  }
+}
+
+// 注册完成的集群到可选列表
+async function registerCompletedCluster(clusterTag) {
+  try {
+    console.log(`Registering completed cluster: ${clusterTag}`);
+    
+    const fs = require('fs');
+    const path = require('path');
+    
+    // 读取创建时的metadata
+    const metadataDir = clusterManager.getClusterMetadataDir(clusterTag);
+    const creationMetadataPath = path.join(metadataDir, 'creation_metadata.json');
+    
+    if (!fs.existsSync(creationMetadataPath)) {
+      console.error(`Creation metadata not found for cluster: ${clusterTag}`);
+      return;
+    }
+    
+    const creationMetadata = JSON.parse(fs.readFileSync(creationMetadataPath, 'utf8'));
+    
+    // 生成cluster_info.json（兼容现有格式）
+    const clusterInfo = {
+      clusterTag: clusterTag,
+      region: creationMetadata.userConfig.awsRegion,
+      status: 'active',
+      type: 'created',
+      createdAt: creationMetadata.createdAt,
+      lastModified: new Date().toISOString(),
+      source: 'ui-panel-creation',
+      cloudFormation: {
+        stackName: creationMetadata.cloudFormation.stackName,
+        stackId: creationMetadata.cloudFormation.stackId
+      }
+    };
+    
+    // 保存cluster_info.json
+    const clusterInfoPath = path.join(metadataDir, 'cluster_info.json');
+    fs.writeFileSync(clusterInfoPath, JSON.stringify(clusterInfo, null, 2));
+    
+    console.log(`Successfully registered cluster: ${clusterTag}`);
+    
+    // 发送WebSocket通知
+    broadcast({
+      type: 'cluster_creation_completed',
+      status: 'success',
+      message: `EKS cluster created and registered: ${clusterTag}`,
+      clusterTag: clusterTag
+    });
+    
+  } catch (error) {
+    console.error(`Failed to register completed cluster ${clusterTag}:`, error);
+  }
+}
+
+// 清理creating metadata（不触碰CloudFormation）
+function cleanupCreatingMetadata(clusterTag) {
+  const fs = require('fs');
+  const path = require('path');
+  
+  try {
+    console.log(`Cleaning up creating metadata for: ${clusterTag}`);
+    
+    // 从creating-clusters.json中移除
+    const creatingClustersPath = path.join(__dirname, '../managed_clusters_info/creating-clusters.json');
+    if (fs.existsSync(creatingClustersPath)) {
+      const creatingClusters = JSON.parse(fs.readFileSync(creatingClustersPath, 'utf8'));
+      delete creatingClusters[clusterTag];
+      fs.writeFileSync(creatingClustersPath, JSON.stringify(creatingClusters, null, 2));
+    }
+    
+    // 删除集群目录（恢复到空白状态）
+    const clusterDir = path.join(__dirname, '../managed_clusters_info', clusterTag);
+    if (fs.existsSync(clusterDir)) {
+      fs.rmSync(clusterDir, { recursive: true, force: true });
+      console.log(`Removed cluster directory: ${clusterDir}`);
+    }
+    
+    console.log(`Successfully cleaned up metadata for cluster: ${clusterTag}`);
+    
+  } catch (error) {
+    console.error(`Error cleaning up metadata for cluster ${clusterTag}:`, error);
+  }
+}
+
+// 检查集群依赖配置状态
+app.get('/api/cluster/dependency-status/:clusterTag', async (req, res) => {
+  try {
+    const { clusterTag } = req.params;
+    
+    const clusterDir = clusterManager.getClusterDir(clusterTag);
+    const configDir = path.join(clusterDir, 'config');
+    
+    if (!fs.existsSync(configDir)) {
+      return res.status(404).json({ error: 'Cluster not found' });
+    }
+    
+    const status = await ClusterDependencyManager.checkDependencyStatus(configDir);
+    
+    res.json({
+      success: true,
+      clusterTag,
+      dependencyStatus: status
+    });
+    
+  } catch (error) {
+    console.error('Error checking dependency status:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 手动重新配置集群依赖（用于调试）
+app.post('/api/cluster/reconfigure-dependencies/:clusterTag', async (req, res) => {
+  try {
+    const { clusterTag } = req.params;
+    
+    console.log(`Manual reconfiguration requested for cluster: ${clusterTag}`);
+    
+    // 先清理现有配置
+    const clusterDir = clusterManager.getClusterDir(clusterTag);
+    const configDir = path.join(clusterDir, 'config');
+    
+    await ClusterDependencyManager.cleanupDependencies(configDir);
+    
+    // 重新配置
+    await ClusterDependencyManager.configureClusterDependencies(clusterTag, clusterManager);
+    
+    res.json({
+      success: true,
+      message: `Successfully reconfigured dependencies for cluster: ${clusterTag}`
+    });
+    
+  } catch (error) {
+    console.error('Error reconfiguring dependencies:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 获取集群创建状态
+app.get('/api/cluster/creation-status/:clusterTag', async (req, res) => {
+  try {
+    const { clusterTag } = req.params;
+    const fs = require('fs');
+    const path = require('path');
+    
+    // 读取创建metadata获取region和stack信息
+    const metadataDir = clusterManager.getClusterMetadataDir(clusterTag);
+    const creationStatusPath = path.join(metadataDir, 'creation_status.json');
+    
+    if (!fs.existsSync(creationStatusPath)) {
+      return res.status(404).json({ error: 'Creation status not found' });
+    }
+    
+    const creationStatus = JSON.parse(fs.readFileSync(creationStatusPath, 'utf8'));
+    const stackName = creationStatus.stackName;
+    const region = creationStatus.region;
+    
+    if (!stackName || !region) {
+      return res.status(400).json({ error: 'Missing stack name or region in metadata' });
+    }
+    
+    const stackStatus = await CloudFormationManager.getStackStatus(stackName, region);
+    
+    res.json({
+      success: true,
+      clusterTag,
+      stackName,
+      region,
+      ...stackStatus
+    });
+  } catch (error) {
+    console.error('Error getting cluster creation status:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 获取集群创建日志
+app.get('/api/cluster/creation-logs/:clusterTag', async (req, res) => {
+  try {
+    const { clusterTag } = req.params;
+    
+    // 读取集群配置
+    const clusterInfo = await clusterManager.getClusterInfo(clusterTag);
+    if (!clusterInfo) {
+      return res.status(404).json({ error: 'Cluster not found' });
+    }
+    
+    const stackName = `full-stack-${clusterTag}`;
+    const events = await CloudFormationManager.getStackEvents(stackName, clusterInfo.awsRegion);
+    
+    res.json({
+      success: true,
+      clusterTag,
+      stackName,
+      events
+    });
+  } catch (error) {
+    console.error('Error getting cluster creation logs:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 取消集群创建
+app.post('/api/cluster/cancel-creation/:clusterTag', async (req, res) => {
+  try {
+    const { clusterTag } = req.params;
+    
+    // 读取集群配置
+    const clusterInfo = await clusterManager.getClusterInfo(clusterTag);
+    if (!clusterInfo) {
+      return res.status(404).json({ error: 'Cluster not found' });
+    }
+    
+    const stackName = `full-stack-${clusterTag}`;
+    const result = await CloudFormationManager.cancelStackCreation(stackName, clusterInfo.awsRegion);
+    
+    // 发送WebSocket通知
+    broadcast({
+      type: 'cluster_creation_cancelled',
+      status: 'success',
+      message: `Cluster creation cancelled: ${clusterTag}`,
+      clusterTag
+    });
+    
+    res.json({
+      success: true,
+      clusterTag,
+      ...result
+    });
+  } catch (error) {
+    console.error('Error cancelling cluster creation:', error);
+    
+    broadcast({
+      type: 'cluster_creation_cancelled',
+      status: 'error',
+      message: `Failed to cancel cluster creation: ${error.message}`
+    });
+    
+    res.status(500).json({ error: error.message });
+  }
+});
+
+console.log('EKS cluster creation APIs loaded');
 
 app.listen(PORT, () => {
   console.log('🚀 ========================================');

@@ -5,22 +5,54 @@ const yaml = require('yaml');
 
 class S3StorageManager {
   constructor() {
-    this.storageConfigPath = path.join(__dirname, '../config/s3-storages.json');
-    this.ensureConfigFile();
+    // 不再使用全局配置路径
+    this.managedClustersPath = path.join(__dirname, '../managed_clusters_info');
   }
 
-  // 确保配置文件存在
-  ensureConfigFile() {
-    if (!fs.existsSync(this.storageConfigPath)) {
-      fs.ensureDirSync(path.dirname(this.storageConfigPath));
-      fs.writeJsonSync(this.storageConfigPath, { storages: [] });
+  // 获取当前活跃集群的S3配置路径
+  getActiveClusterStorageConfigPath() {
+    try {
+      const activeClusterPath = path.join(this.managedClustersPath, 'active_cluster.json');
+      if (!fs.existsSync(activeClusterPath)) {
+        return null;
+      }
+      
+      const activeClusterInfo = fs.readJsonSync(activeClusterPath);
+      const activeCluster = activeClusterInfo.activeCluster;
+      
+      if (!activeCluster) {
+        return null;
+      }
+      
+      const clusterConfigPath = path.join(this.managedClustersPath, activeCluster, 'config', 's3-storages.json');
+      return clusterConfigPath;
+    } catch (error) {
+      console.error('Error getting active cluster storage config path:', error);
+      return null;
     }
+  }
+
+  // 确保集群配置文件存在
+  ensureClusterConfigFile(configPath) {
+    if (!configPath) return false;
+    
+    if (!fs.existsSync(configPath)) {
+      fs.ensureDirSync(path.dirname(configPath));
+      fs.writeJsonSync(configPath, { storages: [] });
+    }
+    return true;
   }
 
   // 获取所有S3存储配置
   async getStorages() {
     try {
-      const config = fs.readJsonSync(this.storageConfigPath);
+      const configPath = this.getActiveClusterStorageConfigPath();
+      if (!configPath || !this.ensureClusterConfigFile(configPath)) {
+        // 如果没有活跃集群，返回空列表
+        return { success: true, storages: [] };
+      }
+      
+      const config = fs.readJsonSync(configPath);
       
       // 检测现有的S3 PV/PVC
       const existingStorages = await this.detectExistingS3Storages();
@@ -52,6 +84,7 @@ class S3StorageManager {
     return new Promise((resolve) => {
       exec('kubectl get pvc -o json', (error, stdout) => {
         if (error) {
+          console.log('kubectl connection failed, returning empty storage list:', error.message);
           resolve([]);
           return;
         }
@@ -60,10 +93,25 @@ class S3StorageManager {
           const pvcList = JSON.parse(stdout);
           const s3Storages = [];
           
-          for (let pvc of pvcList.items || []) {
+          if (!pvcList.items || pvcList.items.length === 0) {
+            console.log('No PVCs found in cluster, returning empty storage list');
+            resolve([]);
+            return;
+          }
+          
+          let pendingChecks = pvcList.items.length;
+          let completedChecks = 0;
+          
+          if (pendingChecks === 0) {
+            resolve([]);
+            return;
+          }
+          
+          for (let pvc of pvcList.items) {
             // 检查是否是S3存储（通过volumeName查找对应的PV）
             if (pvc.spec.volumeName) {
               exec(`kubectl get pv ${pvc.spec.volumeName} -o json`, (pvError, pvStdout) => {
+                completedChecks++;
                 if (!pvError) {
                   try {
                     const pv = JSON.parse(pvStdout);
@@ -79,16 +127,25 @@ class S3StorageManager {
                       });
                     }
                   } catch (e) {
-                    // 忽略解析错误
+                    console.warn('Error parsing PV JSON:', e);
                   }
                 }
+                
+                // 所有检查完成后返回结果
+                if (completedChecks === pendingChecks) {
+                  console.log(`Detected ${s3Storages.length} S3 storages from ${pendingChecks} PVCs`);
+                  resolve(s3Storages);
+                }
               });
+            } else {
+              completedChecks++;
+              if (completedChecks === pendingChecks) {
+                resolve(s3Storages);
+              }
             }
           }
-          
-          // 等待所有PV检查完成
-          setTimeout(() => resolve(s3Storages), 1000);
         } catch (e) {
+          console.error('Error parsing PVC list:', e);
           resolve([]);
         }
       });
@@ -122,6 +179,11 @@ class S3StorageManager {
   // 创建S3存储配置
   async createStorage(storageConfig) {
     try {
+      const configPath = this.getActiveClusterStorageConfigPath();
+      if (!configPath || !this.ensureClusterConfigFile(configPath)) {
+        return { success: false, error: 'No active cluster found' };
+      }
+
       const { name, bucketName, region } = storageConfig;
       const pvcName = `s3-${name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
       const pvName = `s3-pv-${name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
@@ -179,8 +241,8 @@ class S3StorageManager {
       const pvcYamlStr = yaml.stringify(pvcYaml);
       await this.applyKubernetesResource(pvcYamlStr);
 
-      // 保存配置
-      const config = fs.readJsonSync(this.storageConfigPath);
+      // 保存配置到当前集群的配置文件
+      const config = fs.readJsonSync(configPath);
       config.storages.push({
         name,
         bucketName,
@@ -189,7 +251,7 @@ class S3StorageManager {
         pvName,
         createdAt: new Date().toISOString()
       });
-      fs.writeJsonSync(this.storageConfigPath, config);
+      fs.writeJsonSync(configPath, config);
 
       return { success: true, pvcName, pvName };
     } catch (error) {
@@ -201,7 +263,12 @@ class S3StorageManager {
   // 删除S3存储配置
   async deleteStorage(name) {
     try {
-      const config = fs.readJsonSync(this.storageConfigPath);
+      const configPath = this.getActiveClusterStorageConfigPath();
+      if (!configPath || !this.ensureClusterConfigFile(configPath)) {
+        return { success: false, error: 'No active cluster found' };
+      }
+
+      const config = fs.readJsonSync(configPath);
       const storage = config.storages.find(s => s.name === name);
       
       if (!storage) {
@@ -214,7 +281,7 @@ class S3StorageManager {
 
       // 从配置中移除
       config.storages = config.storages.filter(s => s.name !== name);
-      fs.writeJsonSync(this.storageConfigPath, config);
+      fs.writeJsonSync(configPath, config);
 
       return { success: true };
     } catch (error) {

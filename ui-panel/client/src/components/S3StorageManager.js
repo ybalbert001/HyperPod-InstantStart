@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Form, Input, Button, Table, Space, message, Modal, Typography, Tag, Row, Col } from 'antd';
-import { CloudOutlined, DeleteOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { CloudOutlined, DeleteOutlined, CheckCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import globalRefreshManager from '../hooks/useGlobalRefresh';
 
 const { Text } = Typography;
@@ -212,6 +212,7 @@ const S3StorageManager = ({ onStorageChange }) => {
           extra={
             <Button 
               type="text" 
+              icon={<ReloadOutlined />}
               onClick={fetchStorages}
               loading={loading}
             >

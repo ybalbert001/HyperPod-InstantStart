@@ -39,6 +39,7 @@ import {
 import globalRefreshManager from '../hooks/useGlobalRefresh';
 import operationRefreshManager from '../hooks/useOperationRefresh';
 import NodeGroupManager from './NodeGroupManager';
+import EksClusterCreationPanel from './EksClusterCreationPanel';
 
 const { Title, Text } = Typography;
 const { Step } = Steps;
@@ -1393,6 +1394,16 @@ const ClusterManagement = () => {
                     </Col>
                   </Row>
                 )
+              },
+              {
+                key: 'create-eks',
+                label: (
+                  <Space>
+                    <CloudServerOutlined />
+                    <span>Create EKS Cluster</span>
+                  </Space>
+                ),
+                children: <EksClusterCreationPanel />
               }
             ]}
           />

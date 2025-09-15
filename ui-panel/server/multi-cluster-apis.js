@@ -58,6 +58,10 @@ class MultiClusterAPIs {
       // 恢复该集群的配置到 CLI 目录
       this.clusterManager.restoreClusterConfig(clusterTag);
       
+      // 切换kubectl配置到新集群
+      await this.switchKubectlConfig(clusterTag);
+      console.log(`Successfully switched kubectl config to cluster: ${clusterTag}`);
+      
       try {
         // 同步执行kubectl配置切换，确保完成后再返回
         await this.switchKubectlConfig(clusterTag);
