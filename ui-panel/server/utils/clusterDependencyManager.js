@@ -150,6 +150,142 @@ helm upgrade --install hyperpod-dependencies ./sagemaker-hyperpod-cli/helm_chart
   }
 
   /**
+   * 安装HyperPod专用依赖 (HyperPod集群创建完成后调用)
+   */
+  static async installHyperPodDependencies(clusterConfigDir) {
+    console.log('Installing HyperPod-specific dependencies...');
+    
+    const commands = `cd ${clusterConfigDir} && bash -c 'source init_envs && 
+
+    # 检查stack_envs文件是否存在
+    if [ ! -f "stack_envs" ]; then
+      echo "WARNING: stack_envs file not found. This cluster may be imported without CloudFormation."
+      echo "Skipping HyperPod Training Operator installation (requires SageMaker execution role)."
+      echo "Only installing KubeRay Operator..."
+      
+      # 仅安装KubeRay Operator
+      echo "=== Installing KubeRay Operator ==="
+      helm repo add kuberay https://ray-project.github.io/kuberay-helm/
+      helm repo update
+      helm install kuberay-operator kuberay/kuberay-operator --version 1.2.0 --namespace kube-system
+      
+      echo "=== Installation completed (limited features due to missing CloudFormation) ==="
+      exit 0
+    fi
+
+    # 如果stack_envs存在，则source它并继续完整安装
+    source stack_envs
+
+    # 安装KubeRay Operator
+    echo "=== Installing KubeRay Operator ==="
+    helm repo add kuberay https://ray-project.github.io/kuberay-helm/
+    helm repo update
+    helm install kuberay-operator kuberay/kuberay-operator --version 1.2.0 --namespace kube-system
+
+    # 安装HyperPod Training Operator
+    echo "=== Installing HyperPod Training Operator ==="
+
+    # 检查EXECUTION_ROLE变量是否存在
+    if [ -z "\$EXECUTION_ROLE" ]; then
+      echo "ERROR: EXECUTION_ROLE not found in stack_envs. Cannot install HyperPod Training Operator."
+      echo "KubeRay Operator installation completed."
+      exit 0
+    fi
+
+    # 提取SageMaker执行角色名称
+    EXEC_ROLE_NAME=\${EXECUTION_ROLE##*/}
+    echo "Using execution role: \$EXEC_ROLE_NAME"
+
+    # 1. 为SageMaker执行角色添加DescribeClusterNode权限
+    echo "Adding SageMaker DescribeClusterNode policy..."
+    aws iam put-role-policy \\
+        --role-name \$EXEC_ROLE_NAME \\
+        --policy-name SageMakerDescribeClusterNode \\
+        --policy-document '"'"'{
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "sagemaker:DescribeClusterNode"
+              ],
+              "Resource": "*"
+            }
+          ]
+        }'"'"'
+
+    # 2. 更新角色信任策略，允许EKS Pod Identity
+    echo "Updating assume role policy for EKS Pod Identity..."
+    aws iam update-assume-role-policy \\
+        --role-name \$EXEC_ROLE_NAME \\
+        --policy-document '"'"'{
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Principal": {
+                    "Service": "sagemaker.amazonaws.com"
+                },
+                "Action": "sts:AssumeRole"
+            },
+            {
+                "Sid": "AllowEksAuthToAssumeRoleForPodIdentity",
+                "Effect": "Allow",
+                "Principal": {
+                    "Service": "pods.eks.amazonaws.com"
+                },
+                "Action": [
+                    "sts:AssumeRole",
+                    "sts:TagSession"
+                ]
+            }
+        ]
+    }'"'"'
+
+    # 3. 创建EKS Pod Identity Agent addon
+    echo "Creating EKS Pod Identity Agent addon..."
+    aws eks create-addon \\
+        --cluster-name \$EKS_CLUSTER_NAME \\
+        --addon-name eks-pod-identity-agent \\
+        --region \$AWS_REGION \\
+        --resolve-conflicts OVERWRITE || echo "Pod Identity Agent addon already exists"
+
+    # 4. 创建Pod Identity Association
+    echo "Creating Pod Identity Association..."
+    aws eks create-pod-identity-association \\
+        --cluster-name \$EKS_CLUSTER_NAME \\
+        --role-arn \$EXECUTION_ROLE \\
+        --namespace aws-hyperpod \\
+        --service-account hp-training-operator-controller-manager \\
+        --region \$AWS_REGION || echo "Pod Identity Association already exists"
+
+    # 5. 创建cert-manager addon
+    echo "Creating cert-manager addon..."
+    aws eks create-addon \\
+        --cluster-name \$EKS_CLUSTER_NAME \\
+        --addon-name cert-manager \\
+        --region \$AWS_REGION \\
+        --resolve-conflicts OVERWRITE || echo "cert-manager addon already exists"
+
+    # 6. 等待cert-manager就绪
+    echo "Waiting for cert-manager to be ready..."
+    sleep 60
+
+    # 7. 创建HyperPod Training Operator addon
+    echo "Creating HyperPod Training Operator addon..."
+    aws eks create-addon \\
+        --cluster-name \$EKS_CLUSTER_NAME \\
+        --addon-name amazon-sagemaker-hyperpod-training-operator \\
+        --region \$AWS_REGION \\
+        --resolve-conflicts OVERWRITE || echo "HyperPod Training Operator addon already exists"
+
+    echo "=== All HyperPod dependencies installed successfully ==="
+    '`;
+    
+    execSync(commands, { stdio: 'inherit' });
+  }
+
+  /**
    * 完整的集群依赖配置流程
    */
   static async configureClusterDependencies(clusterTag, clusterManager) {
@@ -176,6 +312,8 @@ helm upgrade --install hyperpod-dependencies ./sagemaker-hyperpod-cli/helm_chart
       
       // 4. 安装通用依赖
       await this.installGeneralDependencies(configDir);
+
+      await this.installHyperPodDependencies(configDir);
       
       console.log(`Successfully configured dependencies for cluster: ${clusterTag}`);
       return { success: true };

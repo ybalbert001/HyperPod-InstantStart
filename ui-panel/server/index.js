@@ -8,6 +8,9 @@ const path = require('path');
 const https = require('https');
 const http = require('http');
 
+// 引入工具模块
+const HyperPodDependencyManager = require('./utils/hyperPodDependencyManager');
+
 // 引入集群状态V2模块
 const { 
   handleClusterStatusV2, 
@@ -749,7 +752,9 @@ app.post('/api/deploy', async (req, res) => {
     
     // 保存到项目目录中的deployments文件夹
     const deploymentsDir = path.join(__dirname, '../deployments');
-    await fs.ensureDir(deploymentsDir);
+    if (!fs.existsSync(deploymentsDir)) {
+      fs.mkdirSync(deploymentsDir, { recursive: true });
+    }
     
     const accessType = isExternal ? 'external' : 'internal';
     const tempYamlPath = path.join(deploymentsDir, `${finalDeploymentTag}-${deploymentType}-${accessType}.yaml`);
@@ -3273,7 +3278,9 @@ app.post('/api/download-model-enhanced', async (req, res) => {
 
     // 确保deployments目录存在
     const deploymentsDir = path.join(__dirname, '..', 'deployments');
-    await fs.ensureDir(deploymentsDir);
+    if (!fs.existsSync(deploymentsDir)) {
+      fs.mkdirSync(deploymentsDir, { recursive: true });
+    }
     
     // 保存生成的YAML文件到deployments目录
     const modelTag = modelId.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
@@ -3368,7 +3375,9 @@ app.post('/api/download-model', async (req, res) => {
     
     // 确保deployments目录存在
     const deploymentsDir = path.join(__dirname, '..', 'deployments');
-    await fs.ensureDir(deploymentsDir);
+    if (!fs.existsSync(deploymentsDir)) {
+      fs.mkdirSync(deploymentsDir, { recursive: true });
+    }
     
     // 保存生成的YAML文件
     const deploymentFile = path.join(deploymentsDir, `model-download-${modelTag}.yaml`);
@@ -4026,7 +4035,7 @@ app.post('/api/cluster/hyperpod/update-software', async (req, res) => {
     broadcast({
       type: 'hyperpod_software_update',
       status: 'success',
-      message: 'HyperPod cluster software update initiated successfully',
+      message: '✅ HyperPod cluster software update started successfully',
       clusterArn: clusterArn
     });
 
@@ -4037,7 +4046,7 @@ app.post('/api/cluster/hyperpod/update-software', async (req, res) => {
     broadcast({
       type: 'hyperpod_software_update',
       status: 'error',
-      message: `Failed to update cluster software: ${error.message}`
+      message: `❌ HyperPod software update failed: ${error.message}`
     });
 
     res.status(500).json({ error: error.message });
@@ -4210,7 +4219,7 @@ app.post('/api/cluster/create-eks', async (req, res) => {
     );
     
     // 创建CloudFormation Stack
-    const stackResult = await CloudFormationManager.createStack({
+    const stackResult = await CloudFormationManager.createEKSStack({
       clusterTag,
       awsRegion,
       stackName
@@ -4267,6 +4276,56 @@ app.post('/api/cluster/create-eks', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// HyperPod创建状态管理
+const CREATING_HYPERPOD_CLUSTERS_FILE = path.join(__dirname, '../managed_clusters_info/creating-hyperpod-clusters.json');
+
+function getCreatingHyperPodClusters() {
+  try {
+    if (fs.existsSync(CREATING_HYPERPOD_CLUSTERS_FILE)) {
+      return JSON.parse(fs.readFileSync(CREATING_HYPERPOD_CLUSTERS_FILE, 'utf8'));
+    }
+    return {};
+  } catch (error) {
+    console.error('Error reading creating HyperPod clusters file:', error);
+    return {};
+  }
+}
+
+function updateCreatingHyperPodStatus(clusterTag, statusUpdate) {
+  try {
+    const creatingClusters = getCreatingHyperPodClusters();
+    
+    if (statusUpdate === 'COMPLETED') {
+      // 移除已完成的集群
+      delete creatingClusters[clusterTag];
+    } else {
+      // 更新或添加集群状态
+      creatingClusters[clusterTag] = {
+        ...creatingClusters[clusterTag],
+        ...statusUpdate,
+        lastUpdated: new Date().toISOString()
+      };
+    }
+    
+    fs.writeFileSync(CREATING_HYPERPOD_CLUSTERS_FILE, JSON.stringify(creatingClusters, null, 2));
+  } catch (error) {
+    console.error('Error updating creating HyperPod clusters status:', error);
+  }
+}
+
+async function registerCompletedHyperPod(clusterTag) {
+  try {
+    console.log(`HyperPod cluster ${clusterTag} creation completed`);
+    
+    // 配置HyperPod自定义依赖
+    await HyperPodDependencyManager.configureHyperPodDependencies(clusterTag, clusterManager);
+    
+  } catch (error) {
+    console.error('Error registering completed HyperPod:', error);
+    // 不抛出错误，避免影响主流程
+  }
+}
 
 // 辅助函数：更新creating-clusters状态
 function updateCreatingClustersStatus(clusterTag, status, additionalData = {}) {
@@ -4576,6 +4635,584 @@ app.get('/api/cluster/creation-logs/:clusterTag', async (req, res) => {
   } catch (error) {
     console.error('Error getting cluster creation logs:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// 获取集群信息API
+app.get('/api/cluster/info', async (req, res) => {
+  try {
+    const { promisify } = require('util');
+    const execAsync = promisify(require('child_process').exec);
+    
+    const activeCluster = clusterManager.getActiveCluster();
+    if (!activeCluster) {
+      return res.status(400).json({ success: false, error: 'No active cluster selected' });
+    }
+    
+    const initEnvsPath = path.join(__dirname, '../managed_clusters_info', activeCluster, 'config/init_envs');
+    const stackEnvsPath = path.join(__dirname, '../managed_clusters_info', activeCluster, 'config/stack_envs');
+    
+    const getEnvVar = async (varName, filePath = initEnvsPath) => {
+      try {
+        const cmd = `source ${filePath} && echo $${varName}`;
+        const result = await execAsync(cmd, { shell: '/bin/bash' });
+        return result.stdout.trim();
+      } catch (error) {
+        return null;
+      }
+    };
+    
+    const eksClusterName = await getEnvVar('EKS_CLUSTER_NAME');
+    const region = await getEnvVar('AWS_REGION');
+    const vpcId = await getEnvVar('VPC_ID', stackEnvsPath);
+    
+    res.json({
+      success: true,
+      activeCluster,
+      eksClusterName,
+      region,
+      vpcId
+    });
+  } catch (error) {
+    console.error('Error getting cluster info:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 获取可用区列表API
+app.get('/api/cluster/availability-zones', async (req, res) => {
+  try {
+    const { execSync } = require('child_process');
+    const { region } = req.query;
+    if (!region) {
+      return res.status(400).json({ success: false, error: 'Region parameter required' });
+    }
+    
+    const command = `aws ec2 describe-availability-zones --region ${region} --query 'AvailabilityZones[*].{ZoneName:ZoneName,ZoneId:ZoneId}' --output json`;
+    const result = execSync(command, { encoding: 'utf8' });
+    const zones = JSON.parse(result);
+    
+    res.json({
+      success: true,
+      zones
+    });
+  } catch (error) {
+    console.error('Error getting availability zones:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// HyperPod集群创建API
+app.post('/api/cluster/create-hyperpod', async (req, res) => {
+  try {
+    const { execSync } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(require('child_process').exec);
+    const path = require('path');
+    
+    const { userConfig } = req.body;
+    
+    // 获取当前活跃集群信息
+    const activeCluster = clusterManager.getActiveCluster();
+    console.log('Active cluster:', activeCluster);
+    if (!activeCluster) {
+      return res.status(400).json({ success: false, error: 'No active cluster selected' });
+    }
+    
+    // 检查kubectl连通性
+    try {
+      console.log('Testing kubectl connectivity...');
+      const kubectlResult = execSync('kubectl cluster-info', { encoding: 'utf8', timeout: 15000 });
+      console.log('kubectl cluster-info result:', kubectlResult);
+    } catch (error) {
+      console.error('kubectl connectivity test failed:', error.message);
+      console.error('kubectl error details:', error);
+      return res.status(400).json({ 
+        success: false, 
+        error: `EKS cluster not accessible via kubectl: ${error.message}` 
+      });
+    }
+    
+    // 获取EKS集群信息
+    const initEnvsPath = path.join(__dirname, '../managed_clusters_info', activeCluster, 'config/init_envs');
+    console.log('Init envs path:', initEnvsPath);
+    const getEnvVar = async (varName) => {
+      const cmd = `source ${initEnvsPath} && echo $${varName}`;
+      const result = await execAsync(cmd, { shell: '/bin/bash' });
+      return result.stdout.trim();
+    };
+    
+    const eksStackName = await getEnvVar('CLOUD_FORMATION_FULL_STACK_NAME');
+    const region = await getEnvVar('AWS_REGION');
+    
+    if (!eksStackName || !region) {
+      return res.status(400).json({ success: false, error: 'Missing EKS cluster configuration' });
+    }
+    
+    // 生成HyperPod配置
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('.')[0];
+    const clusterTag = userConfig.clusterTag;
+    const hyperPodStackName = `hyperpod-${clusterTag}-${timestamp}`;
+    
+    // 使用EKS集群标识作为HyperPod集群名称，保持命名一致性
+    const eksClusterTag = activeCluster; // 使用EKS集群的标识
+    const hyperPodClusterName = `hp-cluster-${eksClusterTag}`;
+    
+    // 获取可用区ID
+    const azCommand = `aws ec2 describe-availability-zones --region ${region} --query "AvailabilityZones[?ZoneName=='${userConfig.availabilityZone}'].ZoneId" --output text`;
+    const azResult = execSync(azCommand, { encoding: 'utf8' });
+    const availabilityZoneId = azResult.trim();
+    
+    // 获取EKS基础设施信息
+    const stackInfo = await CloudFormationManager.fetchStackInfo(eksStackName, region);
+    
+    // 生成CIDR配置
+    const cidrResponse = await fetch('http://localhost:3001/api/cluster/generate-cidr-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        region: region
+      })
+    });
+    const cidrConfig = await cidrResponse.json();
+    
+    console.log('Generated CIDR config:', cidrConfig);
+    
+    if (!cidrConfig.hyperPodPrivateSubnetCidr) {
+      throw new Error('Failed to generate private subnet CIDR');
+    }
+    
+    // 记录创建状态
+    updateCreatingHyperPodStatus(activeCluster, {
+      type: 'hyperpod',
+      status: 'IN_PROGRESS',
+      phase: 'CREATING_STACK',
+      stackName: hyperPodStackName,
+      region: region,
+      createdAt: new Date().toISOString()
+    });
+    
+    // 构建HyperPod配置
+    const hyperPodConfig = {
+      ResourceNamePrefix: clusterTag,
+      AvailabilityZoneId: availabilityZoneId,
+      PrivateSubnet1CIDR: cidrConfig.hyperPodPrivateSubnetCidr,
+      HyperPodClusterName: hyperPodClusterName,
+      NodeRecovery: 'None',
+      UseContinuousNodeProvisioningMode: 'false',
+      CreateAcceleratedInstanceGroup: 'true',
+      AcceleratedInstanceGroupName: `accelerated-${clusterTag}`,
+      AcceleratedInstanceType: userConfig.AcceleratedInstanceType,
+      AcceleratedInstanceCount: userConfig.AcceleratedInstanceCount,
+      AcceleratedEBSVolumeSize: userConfig.AcceleratedEBSVolumeSize,
+      AcceleratedTrainingPlanArn: userConfig.AcceleratedTrainingPlanArn || '',
+      // 自动设置threads per core：有training plan时为2，否则为1
+      AcceleratedThreadsPerCore: userConfig.AcceleratedTrainingPlanArn ? 2 : 1,
+      EnableInstanceStressCheck: 'false',
+      EnableInstanceConnectivityCheck: 'false'
+    };
+    
+    const stackResult = await CloudFormationManager.createHyperPodStack(
+      hyperPodStackName,
+      region,
+      stackInfo,
+      hyperPodConfig
+    );
+    
+    // 保存配置到metadata
+    await clusterManager.saveHyperPodConfig(activeCluster, {
+      stackName: hyperPodStackName,
+      stackId: stackResult.stackId,
+      region: region,
+      userConfig: userConfig,
+      infrastructureInfo: stackInfo,
+      createdAt: new Date().toISOString()
+    });
+    
+    // 发送WebSocket通知
+    broadcast({
+      type: 'hyperpod_creation_started',
+      status: 'success',
+      message: `HyperPod cluster creation started: ${hyperPodStackName}`,
+      clusterTag: activeCluster,
+      stackName: hyperPodStackName
+    });
+    
+    res.json({
+      success: true,
+      stackName: hyperPodStackName,
+      stackId: stackResult.stackId,
+      message: 'HyperPod cluster creation started'
+    });
+    
+  } catch (error) {
+    console.error('Error creating HyperPod cluster:', error);
+    
+    // 更新失败状态
+    const activeCluster = clusterManager.getActiveCluster();
+    if (activeCluster) {
+      updateCreatingHyperPodStatus(activeCluster, {
+        status: 'FAILED',
+        error: error.message,
+        failedAt: new Date().toISOString()
+      });
+    }
+    
+    broadcast({
+      type: 'hyperpod_creation_failed',
+      status: 'error',
+      message: `HyperPod creation failed: ${error.message}`
+    });
+    
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 获取EKS节点组创建所需的子网信息
+app.get('/api/cluster/subnets', async (req, res) => {
+  try {
+    const { promisify } = require('util');
+    const execAsync = promisify(require('child_process').exec);
+    const path = require('path');
+    
+    // 获取当前活跃集群信息
+    const activeCluster = clusterManager.getActiveCluster();
+    if (!activeCluster) {
+      return res.status(400).json({ success: false, error: 'No active cluster selected' });
+    }
+    
+    // 获取集群配置
+    const initEnvsPath = path.join(__dirname, '../managed_clusters_info', activeCluster, 'config/init_envs');
+    const getEnvVar = async (varName) => {
+      const cmd = `source ${initEnvsPath} && echo $${varName}`;
+      const result = await execAsync(cmd, { shell: '/bin/bash' });
+      return result.stdout.trim();
+    };
+    
+    const eksStackName = await getEnvVar('CLOUD_FORMATION_FULL_STACK_NAME');
+    const region = await getEnvVar('AWS_REGION');
+    const eksClusterName = await getEnvVar('EKS_CLUSTER_NAME');
+    
+    if (!eksStackName || !region) {
+      return res.status(400).json({ success: false, error: 'Missing EKS cluster configuration' });
+    }
+    
+    // 获取CloudFormation输出信息
+    const stackInfo = await CloudFormationManager.fetchStackInfo(eksStackName, region);
+    const vpcId = stackInfo.VPC_ID;
+    
+    if (!vpcId) {
+      return res.status(400).json({ success: false, error: 'VPC ID not found in stack outputs' });
+    }
+    
+    // 获取子网信息
+    const subnetInfo = await CloudFormationManager.fetchSubnetInfo(vpcId, region);
+    
+    // 获取HyperPod使用的子网
+    let hyperPodSubnets = [];
+    try {
+      const hpClusterName = eksClusterName.replace('eks-cluster-', 'hp-cluster-');
+      const hpCmd = `aws sagemaker describe-cluster --cluster-name ${hpClusterName} --region ${region} --output json`;
+      const hpResult = await execAsync(hpCmd);
+      const hpData = JSON.parse(hpResult.stdout);
+      
+      // 从VpcConfig中提取HyperPod使用的子网ID
+      if (hpData.VpcConfig && hpData.VpcConfig.Subnets) {
+        hyperPodSubnets = hpData.VpcConfig.Subnets;
+        console.log('Found HyperPod subnets:', hyperPodSubnets);
+      }
+    } catch (error) {
+      console.log('No HyperPod cluster found or error fetching HyperPod subnets:', error.message);
+    }
+    
+    // 标记HyperPod使用的子网
+    const markedSubnets = {
+      publicSubnets: subnetInfo.publicSubnets,
+      privateSubnets: subnetInfo.privateSubnets.map(subnet => ({
+        ...subnet,
+        isHyperPodSubnet: hyperPodSubnets.includes(subnet.subnetId)
+      })),
+      hyperPodSubnets: hyperPodSubnets
+    };
+    
+    res.json({
+      success: true,
+      data: {
+        eksClusterName,
+        region,
+        vpcId,
+        ...markedSubnets
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error fetching subnets:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 创建EKS节点组
+app.post('/api/cluster/create-nodegroup', async (req, res) => {
+  try {
+    const { promisify } = require('util');
+    const execAsync = promisify(require('child_process').exec);
+    const { spawn } = require('child_process');
+    const path = require('path');
+    const EksNodeGroupDependencyManager = require('./utils/eksNodeGroupDependencyManager');
+    
+    const { userConfig } = req.body;
+    
+    // 获取当前活跃集群信息
+    const activeCluster = clusterManager.getActiveCluster();
+    if (!activeCluster) {
+      return res.status(400).json({ success: false, error: 'No active cluster selected' });
+    }
+    
+    // 获取集群配置
+    const initEnvsPath = path.join(__dirname, '../managed_clusters_info', activeCluster, 'config/init_envs');
+    const getEnvVar = async (varName) => {
+      const cmd = `source ${initEnvsPath} && echo $${varName}`;
+      const result = await execAsync(cmd, { shell: '/bin/bash' });
+      return result.stdout.trim();
+    };
+    
+    const eksClusterName = await getEnvVar('EKS_CLUSTER_NAME');
+    const region = await getEnvVar('AWS_REGION');
+    const eksStackName = await getEnvVar('CLOUD_FORMATION_FULL_STACK_NAME');
+    
+    // 获取CloudFormation输出信息
+    const stackInfo = await CloudFormationManager.fetchStackInfo(eksStackName, region);
+    
+    // 获取子网信息
+    const subnetInfo = await CloudFormationManager.fetchSubnetInfo(stackInfo.VPC_ID, region);
+    
+    // 创建节点组配置
+    const createResult = await CloudFormationManager.createEksNodeGroup(
+      userConfig, 
+      region, 
+      eksClusterName,
+      stackInfo.VPC_ID,
+      stackInfo.SECURITY_GROUP_ID,
+      subnetInfo
+    );
+
+    // 异步执行eksctl命令
+    const childProcess = spawn('eksctl', ['create', 'nodegroup', '-f', createResult.configFile], {
+      stdio: 'pipe'
+    });
+    
+    let output = '';
+    let errorOutput = '';
+    
+    childProcess.stdout.on('data', (data) => {
+      output += data.toString();
+      console.log('eksctl stdout:', data.toString());
+    });
+    
+    childProcess.stderr.on('data', (data) => {
+      errorOutput += data.toString();
+      console.log('eksctl stderr:', data.toString());
+    });
+    
+    childProcess.on('close', async (code) => {
+      // 清理临时文件
+      require('fs').unlinkSync(createResult.configFile);
+      
+      if (code === 0) {
+        broadcast({
+          type: 'nodegroup_creation_completed',
+          status: 'success',
+          message: `EKS node group ${userConfig.nodeGroupName} created successfully`
+        });
+        
+        // 自动配置节点组依赖
+        try {
+          console.log(`Starting dependency configuration for node group: ${userConfig.nodeGroupName}`);
+          
+          broadcast({
+            type: 'nodegroup_dependencies_started',
+            status: 'info',
+            message: `Configuring dependencies for node group: ${userConfig.nodeGroupName}`
+          });
+          
+          await EksNodeGroupDependencyManager.configureNodeGroupDependencies(
+            activeCluster, 
+            userConfig.nodeGroupName, 
+            clusterManager
+          );
+          
+          broadcast({
+            type: 'nodegroup_dependencies_completed',
+            status: 'success',
+            message: `Node group dependencies configured successfully: ${userConfig.nodeGroupName}`
+          });
+          
+        } catch (error) {
+          console.error('Error configuring node group dependencies:', error);
+          broadcast({
+            type: 'nodegroup_dependencies_failed',
+            status: 'error',
+            message: `Node group dependencies failed: ${error.message}`
+          });
+        }
+      } else {
+        broadcast({
+          type: 'nodegroup_creation_failed',
+          status: 'error',
+          message: `EKS node group creation failed: ${errorOutput}`
+        });
+      }
+    });
+    
+    // 立即返回成功响应
+    broadcast({
+      type: 'nodegroup_creation_started',
+      status: 'info',
+      message: `EKS node group creation started: ${userConfig.nodeGroupName}`
+    });
+    
+    res.json({
+      success: true,
+      message: 'EKS node group creation started',
+      nodeGroupName: userConfig.nodeGroupName
+    });
+    
+  } catch (error) {
+    console.error('Error creating EKS node group:', error);
+    
+    broadcast({
+      type: 'nodegroup_creation_failed',
+      status: 'error',
+      message: `EKS node group creation failed: ${error.message}`
+    });
+    
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 检查EKS节点组依赖状态
+app.get('/api/cluster/:clusterTag/nodegroup/:nodeGroupName/dependencies/status', async (req, res) => {
+  try {
+    const { clusterTag, nodeGroupName } = req.params;
+    const EksNodeGroupDependencyManager = require('./utils/eksNodeGroupDependencyManager');
+    
+    const clusterDir = clusterManager.getClusterDir(clusterTag);
+    const configDir = path.join(clusterDir, 'config');
+    
+    const status = await EksNodeGroupDependencyManager.checkDependencyStatus(configDir, nodeGroupName);
+    res.json(status);
+    
+  } catch (error) {
+    console.error('Error checking node group dependency status:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 获取HyperPod创建状态
+app.get('/api/cluster/hyperpod-creation-status/:clusterTag', async (req, res) => {
+  try {
+    const { execSync } = require('child_process');
+    const { clusterTag } = req.params;
+    const creatingClusters = getCreatingHyperPodClusters();
+    const status = creatingClusters[clusterTag];
+    
+    if (!status) {
+      return res.json({ success: true, status: null });
+    }
+    
+    // 检查CloudFormation状态
+    if (status.stackName && status.region) {
+      try {
+        const checkCmd = `aws cloudformation describe-stacks --stack-name ${status.stackName} --region ${status.region} --query 'Stacks[0].StackStatus' --output text`;
+        const stackStatus = execSync(checkCmd, { encoding: 'utf8', timeout: 10000 }).trim();
+        
+        if (stackStatus === 'CREATE_COMPLETE') {
+          // 创建完成，清理状态并注册
+          updateCreatingHyperPodStatus(clusterTag, 'COMPLETED');
+          await registerCompletedHyperPod(clusterTag);
+          
+          broadcast({
+            type: 'hyperpod_creation_completed',
+            status: 'success',
+            message: `HyperPod cluster created successfully: ${status.stackName}`,
+            clusterTag: clusterTag
+          });
+          
+          return res.json({ success: true, status: { ...status, cfStatus: 'CREATE_COMPLETE' } });
+        } else if (stackStatus.includes('FAILED') || stackStatus.includes('ROLLBACK') || stackStatus.includes('DELETE')) {
+          // 创建失败，自动清理记录
+          console.log(`Auto-cleaning failed HyperPod creation: ${clusterTag}, status: ${stackStatus}`);
+          updateCreatingHyperPodStatus(clusterTag, 'COMPLETED');
+          
+          broadcast({
+            type: 'hyperpod_creation_failed',
+            status: 'error',
+            message: `HyperPod creation failed and cleaned up: ${stackStatus}`,
+            clusterTag: clusterTag
+          });
+          
+          return res.json({ success: true, status: null }); // 返回null表示已清理
+        }
+        
+        status.cfStatus = stackStatus;
+      } catch (error) {
+        // Stack不存在，清理记录
+        if (error.message.includes('does not exist')) {
+          console.log(`Auto-cleaning non-existent HyperPod stack: ${clusterTag}`);
+          updateCreatingHyperPodStatus(clusterTag, 'COMPLETED');
+          return res.json({ success: true, status: null });
+        }
+        console.error(`Error checking CloudFormation status: ${error.message}`);
+      }
+    }
+    
+    res.json({ success: true, status });
+  } catch (error) {
+    console.error('Error getting HyperPod creation status:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 获取正在创建的HyperPod集群列表
+app.get('/api/cluster/creating-hyperpod-clusters', async (req, res) => {
+  try {
+    const { execSync } = require('child_process');
+    const creatingClusters = getCreatingHyperPodClusters();
+    
+    // 检查所有创建中集群的状态，自动清理失败/不存在的记录
+    for (const [clusterTag, clusterInfo] of Object.entries(creatingClusters)) {
+      if (clusterInfo.stackName && clusterInfo.region) {
+        try {
+          // 检查CloudFormation stack状态
+          const checkCmd = `aws cloudformation describe-stacks --stack-name ${clusterInfo.stackName} --region ${clusterInfo.region} --query 'Stacks[0].StackStatus' --output text`;
+          const stackStatus = execSync(checkCmd, { encoding: 'utf8', timeout: 10000 }).trim();
+          
+          if (stackStatus === 'CREATE_COMPLETE') {
+            updateCreatingHyperPodStatus(clusterTag, 'COMPLETED');
+            await registerCompletedHyperPod(clusterTag);
+          } else if (stackStatus.includes('FAILED') || stackStatus.includes('ROLLBACK') || stackStatus.includes('DELETE')) {
+            // 自动清理失败的记录
+            console.log(`Auto-cleaning failed HyperPod creation: ${clusterTag}, status: ${stackStatus}`);
+            updateCreatingHyperPodStatus(clusterTag, 'COMPLETED'); // 移除记录
+          }
+        } catch (error) {
+          // Stack不存在或其他错误，清理记录
+          if (error.message.includes('does not exist')) {
+            console.log(`Auto-cleaning non-existent HyperPod stack: ${clusterTag}`);
+            updateCreatingHyperPodStatus(clusterTag, 'COMPLETED'); // 移除记录
+          } else {
+            console.error(`Error checking status for ${clusterTag}:`, error.message);
+          }
+        }
+      }
+    }
+    
+    // 返回清理后的状态
+    const updatedClusters = getCreatingHyperPodClusters();
+    res.json({ success: true, data: updatedClusters });
+  } catch (error) {
+    console.error('Error getting creating HyperPod clusters:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

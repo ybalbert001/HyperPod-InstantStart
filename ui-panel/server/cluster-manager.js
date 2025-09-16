@@ -4,6 +4,7 @@ const path = require('path');
 class ClusterManager {
   constructor() {
     this.baseDir = path.join(__dirname, '..', 'managed_clusters_info'); // 修正路径
+    this.clustersDir = this.baseDir; // 添加clustersDir属性
     this.cliDir = path.join(__dirname, '..', '..', 'cli'); // 修正路径
     this.activeClusterFile = path.join(this.baseDir, 'active_cluster.json');
     
@@ -195,6 +196,56 @@ class ClusterManager {
         }
       }
     });
+  }
+
+  /**
+   * 保存HyperPod配置
+   * @param {string} clusterTag - 集群标识
+   * @param {Object} hyperPodConfig - HyperPod配置
+   */
+  async saveHyperPodConfig(clusterTag, hyperPodConfig) {
+    try {
+      const clusterDir = path.join(this.clustersDir, clusterTag);
+      const metadataDir = path.join(clusterDir, 'metadata');
+      
+      // 确保目录存在
+      if (!fs.existsSync(metadataDir)) {
+        fs.mkdirSync(metadataDir, { recursive: true });
+      }
+      
+      // 保存HyperPod配置
+      const hyperPodConfigPath = path.join(metadataDir, 'hyperpod-config.json');
+      fs.writeFileSync(hyperPodConfigPath, JSON.stringify({
+        hyperPodCluster: hyperPodConfig,
+        savedAt: new Date().toISOString()
+      }, null, 2));
+      
+      console.log(`HyperPod configuration saved for cluster: ${clusterTag}`);
+    } catch (error) {
+      console.error('Error saving HyperPod configuration:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取HyperPod配置
+   * @param {string} clusterTag - 集群标识
+   * @returns {Object|null} HyperPod配置
+   */
+  async getHyperPodConfig(clusterTag) {
+    try {
+      const hyperPodConfigPath = path.join(this.clustersDir, clusterTag, 'metadata', 'hyperpod-config.json');
+      
+      if (await fs.pathExists(hyperPodConfigPath)) {
+        const config = await fs.readJson(hyperPodConfigPath);
+        return config.hyperPodCluster;
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('Error getting HyperPod configuration:', error);
+      return null;
+    }
   }
 
   // 保存导入集群配置

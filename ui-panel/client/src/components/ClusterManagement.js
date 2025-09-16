@@ -50,6 +50,7 @@ const ClusterManagement = () => {
   const [clusters, setClusters] = useState([]);
   const [activeCluster, setActiveCluster] = useState(null);
   const [clustersLoading, setClustersLoading] = useState(false);
+  const [clusterDetails, setClusterDetails] = useState(null);
   
   // 导入现有集群状态
   const [showImportModal, setShowImportModal] = useState(false);
@@ -220,12 +221,31 @@ const ClusterManagement = () => {
             }
           }
         }
+        
+        // 获取集群详细信息
+        if (result.activeCluster) {
+          await fetchClusterDetails();
+        }
       }
     } catch (error) {
       console.error('Failed to fetch clusters:', error);
       message.error('Failed to load clusters');
     } finally {
       setClustersLoading(false);
+    }
+  };
+
+  // 获取集群详细信息
+  const fetchClusterDetails = async () => {
+    try {
+      const response = await fetch('/api/cluster/info');
+      const result = await response.json();
+      if (result.success) {
+        setClusterDetails(result);
+      }
+    } catch (error) {
+      console.error('Failed to fetch cluster details:', error);
+      setClusterDetails(null);
     }
   };
 
@@ -257,6 +277,9 @@ const ClusterManagement = () => {
           form.setFieldsValue(clusterInfo.config);
           setEnableFtp(clusterInfo.config.enableFtp || false);
         }
+        
+        // 获取集群详细信息
+        await fetchClusterDetails();
         
         // 重置状态，因为切换到了不同的集群
         setStep1Status('wait');
@@ -797,72 +820,59 @@ const ClusterManagement = () => {
                               const cluster = clusters.find(c => c.clusterTag === activeCluster);
                               if (!cluster) return <Text type="secondary">Loading cluster information...</Text>;
                               
-                              if (cluster.type === 'imported') {
-                                return (
-                                  <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-                                    <Row gutter={[16, 16]}>
-                                      <Col span={12}>
-                                        <div>
-                                          <Text strong>EKS Cluster Name:</Text>
-                                          <br />
-                                          <Text code>{cluster.config?.eksClusterName || 'N/A'}</Text>
-                                        </div>
-                                      </Col>
-                                      <Col span={12}>
-                                        <div>
-                                          <Text strong>AWS Region:</Text>
-                                          <br />
-                                          <Text code>{cluster.config?.awsRegion || 'N/A'}</Text>
-                                        </div>
-                                      </Col>
-                                    </Row>
-                                    <div>
-                                      <Text strong>Tags:</Text>
-                                      <br />
-                                      <Space>
-                                        <Tag color="blue">Imported</Tag>
-                                      </Space>
-                                    </div>
-                                  </Space>
-                                );
-                              } else {
-                                return (
-                                  <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-                                    <Row gutter={[16, 16]}>
-                                      <Col span={12}>
-                                        <div>
-                                          <Text strong>Cluster Tag:</Text>
-                                          <br />
-                                          <Text code>{cluster.config?.clusterTag || 'N/A'}</Text>
-                                        </div>
-                                      </Col>
-                                      <Col span={12}>
-                                        <div>
-                                          <Text strong>AWS Region:</Text>
-                                          <br />
-                                          <Text code>{cluster.config?.awsRegion || 'N/A'}</Text>
-                                        </div>
-                                      </Col>
-                                    </Row>
-                                    <Row gutter={[16, 16]}>
-                                      <Col span={12}>
-                                        <div>
-                                          <Text strong>GPU Instance Type:</Text>
-                                          <br />
-                                          <Text code>{cluster.config?.gpuInstanceType || 'N/A'}</Text>
-                                        </div>
-                                      </Col>
-                                    </Row>
-                                    <div>
-                                      <Text strong>Tags:</Text>
-                                      <br />
-                                      <Space>
-                                        <Tag color="green">Created</Tag>
-                                      </Space>
-                                    </div>
-                                  </Space>
-                                );
-                              }
+                              // 统一获取cluster tag和region
+                              const clusterTag = cluster.clusterTag || cluster.config?.clusterTag || 'N/A';
+                              const region = cluster.region || cluster.config?.awsRegion || 'N/A';
+                              const creationType = cluster.type === 'imported' ? 'Imported' : 'Created';
+                              const creationColor = cluster.type === 'imported' ? 'blue' : 'green';
+                              
+                              // 从API获取的详细信息
+                              const eksClusterName = clusterDetails?.eksClusterName || 'N/A';
+                              const vpcId = clusterDetails?.vpcId || 'N/A';
+                              
+                              return (
+                                <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                                  <Row gutter={[16, 16]}>
+                                    <Col span={12}>
+                                      <div>
+                                        <Text strong>Custom Tag:</Text>
+                                        <br />
+                                        <Text code>{clusterTag}</Text>
+                                      </div>
+                                    </Col>
+                                    <Col span={12}>
+                                      <div>
+                                        <Text strong>AWS Region:</Text>
+                                        <br />
+                                        <Text code>{region}</Text>
+                                      </div>
+                                    </Col>
+                                  </Row>
+                                  <Row gutter={[16, 16]}>
+                                    <Col span={12}>
+                                      <div>
+                                        <Text strong>EKS Cluster Name:</Text>
+                                        <br />
+                                        <Text code>{eksClusterName}</Text>
+                                      </div>
+                                    </Col>
+                                    <Col span={12}>
+                                      <div>
+                                        <Text strong>VPC ID:</Text>
+                                        <br />
+                                        <Text code>{vpcId}</Text>
+                                      </div>
+                                    </Col>
+                                  </Row>
+                                  <div>
+                                    <Text strong>Creation Type:</Text>
+                                    <br />
+                                    <Space>
+                                      <Tag color={creationColor}>{creationType}</Tag>
+                                    </Space>
+                                  </div>
+                                </Space>
+                              );
                             })()}
                           </Card>
                         )}

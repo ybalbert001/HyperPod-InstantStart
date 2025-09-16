@@ -169,7 +169,7 @@ Resources:
           echo "Starting dependency installation at $(date)"
           
           apt-get update -y
-          apt-get install -y zip unzip curl wget python3-pip docker.io s3fs
+          apt-get install -y zip unzip curl wget python3-pip docker.io jq s3fs
           
           systemctl start docker
           systemctl enable docker
@@ -225,7 +225,7 @@ Resources:
           
           sudo -u ubuntu s3fs $S3_BUCKET_NAME /home/ubuntu/workspace/s3 -o iam_role=${EKSPlusHYPDAdminRole}
           
-          sudo -u ubuntu touch /home/ubuntu/workspace/s3/$S3_BUCKET_NAME.txt
+          sudo -u ubuntu touch /home/ubuntu/workspace/s3/$S3_BUCKET_NAME
           
           chown -R ubuntu:ubuntu /home/ubuntu/
           

@@ -97,6 +97,18 @@ export const REFRESH_CONFIG = {
         { components: ['all'], delay: 10000 } // 确保训练日志和历史记录更新
       ]
     },
+    'hyperpod-create': {
+      immediate: ['nodegroup-manager', 'cluster-status', 'app-status'],
+      delayed: [
+        { components: ['all'], delay: 5000 } // HyperPod创建状态更新
+      ]
+    },
+    'nodegroup-create': {
+      immediate: ['nodegroup-manager', 'cluster-status', 'app-status'],
+      delayed: [
+        { components: ['all'], delay: 5000 } // EKS节点组创建状态更新
+      ]
+    },
     'nodegroup-scale': {
       immediate: ['nodegroup-manager', 'cluster-status', 'pods-services'],
       delayed: [
