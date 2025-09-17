@@ -2287,6 +2287,48 @@ app.post('/api/mlflow-sync', async (req, res) => {
   }
 });
 
+// 创建MLflow Tracking Server API
+app.post('/api/create-mlflow-tracking-server', async (req, res) => {
+  try {
+    const { mlflowServerName, trackingServerSize = 'Small' } = req.body;
+    
+    const MLflowTrackingServerManager = require('./utils/mlflowTrackingServerManager');
+    const mlflowManager = new MLflowTrackingServerManager();
+    
+    // 验证输入参数
+    mlflowManager.validateServerName(mlflowServerName);
+    mlflowManager.validateServerSize(trackingServerSize);
+    
+    // 创建tracking server
+    const result = await mlflowManager.createTrackingServer(mlflowServerName, trackingServerSize);
+    
+    // 广播创建成功消息
+    broadcast({
+      type: 'mlflow_tracking_server_created',
+      status: 'success',
+      message: result.message,
+      serverName: mlflowServerName
+    });
+    
+    res.json(result);
+    
+  } catch (error) {
+    console.error('Error creating MLflow tracking server:', error);
+    
+    // 广播创建失败消息
+    broadcast({
+      type: 'mlflow_tracking_server_created',
+      status: 'error',
+      message: error.message
+    });
+    
+    res.json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
 // 获取训练历史数据（从MLflow）
 app.get('/api/training-history', async (req, res) => {
   try {
@@ -3225,6 +3267,50 @@ const s3StorageManager = new S3StorageManager();
 app.get('/api/s3-storages', async (req, res) => {
   const result = await s3StorageManager.getStorages();
   res.json(result);
+});
+
+// 获取S3存储默认值
+app.get('/api/s3-storage-defaults', async (req, res) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    
+    let defaultBucket = '';
+    
+    // 从容器中的 /s3-workspace-metadata 路径读取默认bucket
+    try {
+      const metadataPath = '/s3-workspace-metadata';
+      if (fs.existsSync(metadataPath)) {
+        const files = fs.readdirSync(metadataPath);
+        const bucketFile = files.find(file => file.startsWith('CURRENT_BUCKET_'));
+        if (bucketFile) {
+          defaultBucket = bucketFile.replace('CURRENT_BUCKET_', '');
+        }
+      }
+    } catch (error) {
+      console.log('Could not read s3-workspace-metadata:', error.message);
+    }
+    
+    res.json({
+      success: true,
+      defaults: {
+        name: 's3-claim',
+        bucketName: defaultBucket,
+        region: 'us-west-2'
+      }
+    });
+  } catch (error) {
+    console.error('Error getting S3 storage defaults:', error);
+    res.json({
+      success: false,
+      error: error.message,
+      defaults: {
+        name: 's3-claim',
+        bucketName: '',
+        region: 'us-west-2'
+      }
+    });
+  }
 });
 
 app.post('/api/s3-storages', async (req, res) => {
@@ -4367,51 +4453,46 @@ app.get('/api/cluster/creating-clusters', async (req, res) => {
     }
     
     const creatingClusters = JSON.parse(fs.readFileSync(creatingClustersPath, 'utf8'));
-    const clustersToCleanup = [];
     
-    // 为每个创建中的集群获取最新状态
+    // 检查状态并处理完成的集群
     for (const [clusterTag, clusterInfo] of Object.entries(creatingClusters)) {
       if (clusterInfo.type === 'eks' && clusterInfo.stackName) {
         try {
           const stackStatus = await CloudFormationManager.getStackStatus(clusterInfo.stackName, clusterInfo.region);
           clusterInfo.currentStackStatus = stackStatus.stackStatus;
           
-          // 如果创建完成或失败，更新状态
+          // 如果EKS集群创建完成，触发依赖配置
           if (stackStatus.stackStatus === 'CREATE_COMPLETE') {
-            // 先更新状态为配置依赖阶段
-            updateCreatingClustersStatus(clusterTag, 'CONFIGURING_DEPENDENCIES');
+            console.log(`EKS cluster ${clusterTag} creation completed, configuring dependencies...`);
             
-            // 配置集群依赖（helm等）
-            await configureClusterDependencies(clusterTag);
-            
-            // 配置完成后，注册集群到可选列表
-            await registerCompletedCluster(clusterTag);
+            // 异步配置依赖，不阻塞API响应
+            setImmediate(async () => {
+              try {
+                await configureClusterDependencies(clusterTag);
+              } catch (error) {
+                console.error(`Failed to configure dependencies for ${clusterTag}:`, error);
+              }
+            });
           } else if (stackStatus.stackStatus.includes('FAILED') || stackStatus.stackStatus.includes('ROLLBACK')) {
-            updateCreatingClustersStatus(clusterTag, 'FAILED', { error: stackStatus.stackStatusReason });
+            // 创建失败，清理状态
+            console.log(`EKS cluster ${clusterTag} creation failed, cleaning up...`);
+            updateCreatingClustersStatus(clusterTag, 'COMPLETED');
           }
+          
         } catch (error) {
           console.error(`Error checking status for cluster ${clusterTag}:`, error);
+          clusterInfo.currentStackStatus = 'UNKNOWN';
           
-          // 如果CloudFormation Stack不存在（被手动删除），标记为需要清理
-          if (error.message.includes('does not exist') || error.message.includes('ValidationError')) {
-            console.log(`CloudFormation stack ${clusterInfo.stackName} no longer exists, cleaning up metadata`);
-            clustersToCleanup.push(clusterTag);
+          // 如果stack不存在，清理状态
+          if (error.message && error.message.includes('does not exist')) {
+            console.log(`Stack for ${clusterTag} does not exist, cleaning up...`);
+            updateCreatingClustersStatus(clusterTag, 'COMPLETED');
           }
         }
       }
     }
     
-    // 清理本地metadata
-    for (const clusterTag of clustersToCleanup) {
-      cleanupCreatingMetadata(clusterTag);
-    }
-    
-    // 重新读取清理后的状态
-    const updatedCreatingClusters = fs.existsSync(creatingClustersPath) 
-      ? JSON.parse(fs.readFileSync(creatingClustersPath, 'utf8'))
-      : {};
-    
-    res.json({ success: true, clusters: updatedCreatingClusters });
+    res.json({ success: true, clusters: creatingClusters });
   } catch (error) {
     console.error('Error getting creating clusters:', error);
     res.status(500).json({ error: error.message });
@@ -4431,15 +4512,27 @@ async function configureClusterDependencies(clusterTag) {
     // 更新状态为完成
     updateCreatingClustersStatus(clusterTag, 'COMPLETED');
     
+    // 注册完成的集群
+    await registerCompletedCluster(clusterTag);
+    
   } catch (error) {
     console.error(`Error configuring dependencies for cluster ${clusterTag}:`, error);
     updateCreatingClustersStatus(clusterTag, 'DEPENDENCY_CONFIG_FAILED', { error: error.message });
+    
+    // 即使依赖配置失败，也要注册集群（让用户能看到集群）
+    console.log(`Registering cluster ${clusterTag} despite dependency configuration failure`);
+    try {
+      await registerCompletedCluster(clusterTag, 'dependency-failed');
+    } catch (registerError) {
+      console.error(`Failed to register cluster ${clusterTag} after dependency failure:`, registerError);
+    }
+    
     throw error;
   }
 }
 
 // 注册完成的集群到可选列表
-async function registerCompletedCluster(clusterTag) {
+async function registerCompletedCluster(clusterTag, status = 'active') {
   try {
     console.log(`Registering completed cluster: ${clusterTag}`);
     
@@ -4461,7 +4554,7 @@ async function registerCompletedCluster(clusterTag) {
     const clusterInfo = {
       clusterTag: clusterTag,
       region: creationMetadata.userConfig.awsRegion,
-      status: 'active',
+      status: status, // 使用传入的状态
       type: 'created',
       createdAt: creationMetadata.createdAt,
       lastModified: new Date().toISOString(),
@@ -4477,6 +4570,14 @@ async function registerCompletedCluster(clusterTag) {
     fs.writeFileSync(clusterInfoPath, JSON.stringify(clusterInfo, null, 2));
     
     console.log(`Successfully registered cluster: ${clusterTag}`);
+    
+    // 自动设置为active cluster
+    try {
+      await clusterManager.setActiveCluster(clusterTag);
+      console.log(`Set ${clusterTag} as active cluster`);
+    } catch (error) {
+      console.error(`Failed to set ${clusterTag} as active cluster:`, error);
+    }
     
     // 发送WebSocket通知
     broadcast({
@@ -5105,6 +5206,32 @@ app.get('/api/cluster/:clusterTag/nodegroup/:nodeGroupName/dependencies/status',
   } catch (error) {
     console.error('Error checking node group dependency status:', error);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 检查HyperPod依赖配置状态
+app.get('/api/cluster/:clusterTag/hyperpod/dependencies/status', async (req, res) => {
+  try {
+    const { clusterTag } = req.params;
+    
+    const clusterDir = clusterManager.getClusterDir(clusterTag);
+    const configDir = path.join(clusterDir, 'config');
+    
+    if (!fs.existsSync(configDir)) {
+      return res.status(404).json({ error: 'Cluster not found' });
+    }
+    
+    const status = await HyperPodDependencyManager.checkHyperPodDependencyStatus(configDir);
+    
+    res.json({
+      success: true,
+      clusterTag,
+      hyperPodDependencyStatus: status
+    });
+    
+  } catch (error) {
+    console.error('Error checking HyperPod dependency status:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 

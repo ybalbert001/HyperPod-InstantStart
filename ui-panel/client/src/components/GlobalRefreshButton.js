@@ -38,11 +38,20 @@ const GlobalRefreshButton = ({ style = {} }) => {
 
   // 更新统计信息
   const updateStats = () => {
-    const refreshStats = globalRefreshManager.getRefreshStats();
-    const components = globalRefreshManager.getComponentStatus();
-    
-    setStats(refreshStats);
-    setComponentStatus(components);
+    try {
+      console.log('updateStats called, globalRefreshManager:', globalRefreshManager);
+      const refreshStats = globalRefreshManager.getRefreshStats();
+      const components = globalRefreshManager.getComponentStatus();
+      
+      console.log('refreshStats:', refreshStats);
+      console.log('components:', components);
+      
+      setStats(refreshStats);
+      setComponentStatus(components);
+    } catch (error) {
+      console.error('Error in updateStats:', error);
+      console.error('globalRefreshManager state:', globalRefreshManager);
+    }
   };
 
   // 初始化和定时更新统计信息
@@ -113,8 +122,10 @@ const GlobalRefreshButton = ({ style = {} }) => {
 
   // 创建统计信息下拉菜单
   const createStatsDropdown = () => {
-    const enabledComponents = componentStatus.filter(c => c.enabled);
-    const disabledComponents = componentStatus.filter(c => c.enabled === false);
+    // 添加安全检查，确保componentStatus是数组
+    const safeComponentStatus = Array.isArray(componentStatus) ? componentStatus : [];
+    const enabledComponents = safeComponentStatus.filter(c => c.enabled);
+    const disabledComponents = safeComponentStatus.filter(c => c.enabled === false);
 
     return (
       <Card 

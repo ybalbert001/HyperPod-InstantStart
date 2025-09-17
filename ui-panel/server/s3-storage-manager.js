@@ -2,6 +2,9 @@ const { exec } = require('child_process');
 const fs = require('fs-extra');
 const path = require('path');
 const yaml = require('yaml');
+const { promisify } = require('util');
+
+const execAsync = promisify(exec);
 
 class S3StorageManager {
   constructor() {
@@ -185,8 +188,32 @@ class S3StorageManager {
       }
 
       const { name, bucketName, region } = storageConfig;
-      const pvcName = `s3-${name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
-      const pvName = `s3-pv-${name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+      
+      // 直接使用用户输入的名称，完全透传
+      const pvcName = name;
+      const pvName = `pv-${name}`;
+
+      // 检查是否已存在同名的PVC
+      try {
+        const checkCmd = `kubectl get pvc ${pvcName} --no-headers 2>/dev/null`;
+        const { stdout } = await execAsync(checkCmd);
+        if (stdout.trim()) {
+          return { success: false, error: `Storage "${name}" already exists` };
+        }
+      } catch (error) {
+        // PVC不存在，继续创建
+      }
+
+      // 检查是否已存在同名的PV
+      try {
+        const checkCmd = `kubectl get pv ${pvName} --no-headers 2>/dev/null`;
+        const { stdout } = await execAsync(checkCmd);
+        if (stdout.trim()) {
+          return { success: false, error: `Storage "${name}" already exists (PV conflict)` };
+        }
+      } catch (error) {
+        // PV不存在，继续创建
+      }
 
       // 创建PV YAML
       const pvYaml = {
@@ -206,7 +233,7 @@ class S3StorageManager {
           ],
           csi: {
             driver: 's3.csi.aws.com',
-            volumeHandle: `s3-csi-driver-volume-${name}`,
+            volumeHandle: `s3-csi-driver-volume-${pvcName}`,
             volumeAttributes: {
               bucketName: bucketName
             }

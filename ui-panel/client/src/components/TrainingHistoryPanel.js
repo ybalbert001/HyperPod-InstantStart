@@ -28,7 +28,8 @@ import {
   BarChartOutlined,
   SettingOutlined,
   ThunderboltOutlined,
-  DownloadOutlined
+  DownloadOutlined,
+  CloudServerOutlined
 } from '@ant-design/icons';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 
@@ -46,6 +47,9 @@ const TrainingHistoryPanel = () => {
   const [configForm] = Form.useForm();
   const [syncLoading, setSyncLoading] = useState(false);
   const [syncForm] = Form.useForm();
+  const [createTrackingServerModalVisible, setCreateTrackingServerModalVisible] = useState(false);
+  const [createTrackingServerForm] = Form.useForm();
+  const [createTrackingServerLoading, setCreateTrackingServerLoading] = useState(false);
 
   const fetchTrainingHistory = async () => {
     setLoading(true);
@@ -180,6 +184,42 @@ const TrainingHistoryPanel = () => {
     }
     
     setConfigModalVisible(true);
+  };
+
+  // 显示创建Tracking Server Modal
+  const showCreateTrackingServerModal = () => {
+    createTrackingServerForm.resetFields();
+    setCreateTrackingServerModalVisible(true);
+  };
+
+  // 创建MLflow Tracking Server
+  const handleCreateTrackingServer = async (values) => {
+    try {
+      setCreateTrackingServerLoading(true);
+      
+      const response = await fetch('/api/create-mlflow-tracking-server', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(values),
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        message.success('MLflow Tracking Server created successfully');
+        setCreateTrackingServerModalVisible(false);
+        createTrackingServerForm.resetFields();
+      } else {
+        message.error(`Failed to create tracking server: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Error creating tracking server:', error);
+      message.error('Failed to create tracking server');
+    } finally {
+      setCreateTrackingServerLoading(false);
+    }
   };
 
   // 同步到共享MLflow服务器
@@ -672,6 +712,13 @@ const TrainingHistoryPanel = () => {
         extra={
           <Space>
             <Button
+              icon={<CloudServerOutlined />}
+              onClick={showCreateTrackingServerModal}
+              title="Create MLflow Tracking Server"
+            >
+              Create Tracking Server
+            </Button>
+            <Button
               icon={<SettingOutlined />}
               onClick={showConfigModal}
               title="Configure MLflow Settings"
@@ -745,6 +792,82 @@ const TrainingHistoryPanel = () => {
           }}
         />
       </Card>
+
+      {/* 创建Tracking Server Modal */}
+      <Modal
+        title="Create MLflow Tracking Server"
+        open={createTrackingServerModalVisible}
+        onCancel={() => setCreateTrackingServerModalVisible(false)}
+        footer={null}
+        width={600}
+      >
+        <Form
+          form={createTrackingServerForm}
+          layout="vertical"
+          onFinish={handleCreateTrackingServer}
+        >
+          <Form.Item
+            label="MLflow Server Name"
+            name="mlflowServerName"
+            rules={[
+              { required: true, message: 'Please input the MLflow server name!' },
+              { pattern: /^[a-zA-Z0-9-]+$/, message: 'Only alphanumeric characters and hyphens allowed' }
+            ]}
+          >
+            <Input placeholder="my-mlflow-server" />
+          </Form.Item>
+
+          <Form.Item
+            label="Tracking Server Size"
+            name="trackingServerSize"
+            initialValue="Small"
+          >
+            <Form.Item noStyle shouldUpdate>
+              {({ getFieldValue, setFieldsValue }) => {
+                const currentSize = getFieldValue('trackingServerSize') || 'Small';
+                return (
+                  <Input.Group compact>
+                    <Button 
+                      type={currentSize === 'Small' ? 'primary' : 'default'}
+                      onClick={() => setFieldsValue({ trackingServerSize: 'Small' })}
+                    >
+                      Small
+                    </Button>
+                    <Button 
+                      type={currentSize === 'Medium' ? 'primary' : 'default'}
+                      onClick={() => setFieldsValue({ trackingServerSize: 'Medium' })}
+                    >
+                      Medium
+                    </Button>
+                    <Button 
+                      type={currentSize === 'Large' ? 'primary' : 'default'}
+                      onClick={() => setFieldsValue({ trackingServerSize: 'Large' })}
+                    >
+                      Large
+                    </Button>
+                  </Input.Group>
+                );
+              }}
+            </Form.Item>
+          </Form.Item>
+
+          <Form.Item>
+            <Space>
+              <Button 
+                type="primary" 
+                htmlType="submit" 
+                loading={createTrackingServerLoading}
+                icon={<CloudServerOutlined />}
+              >
+                Create Tracking Server
+              </Button>
+              <Button onClick={() => setCreateTrackingServerModalVisible(false)}>
+                Cancel
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
 
       {/* 详情Modal */}
       <Modal

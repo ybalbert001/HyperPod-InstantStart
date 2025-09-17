@@ -115,8 +115,8 @@ kubectl create namespace aws-hyperpod --dry-run=client -o yaml | kubectl apply -
     const installCmd = `cd ${clusterConfigDir} && bash -c 'source init_envs && source stack_envs && 
 helm dependency build sagemaker-hyperpod-cli/helm_chart/HyperPodHelmChart && 
 helm upgrade --install hyperpod-dependencies ./sagemaker-hyperpod-cli/helm_chart/HyperPodHelmChart \\
+  --kube-context arn:aws:eks:$AWS_REGION:$(aws sts get-caller-identity --query Account --output text):cluster/$EKS_CLUSTER_NAME \\
   --namespace kube-system \\
-  --create-namespace \\
   --set neuron-device-plugin.devicePlugin.enabled=false \\
   --set nvidia-device-plugin.devicePlugin.enabled=true \\
   --set aws-efa-k8s-device-plugin.devicePlugin.enabled=true \\
@@ -131,19 +131,52 @@ helm upgrade --install hyperpod-dependencies ./sagemaker-hyperpod-cli/helm_chart
   }
 
   /**
-   * 安装通用依赖
+   * 安装EKS通用依赖（不包含HyperPod专用组件）
    */
   static async installGeneralDependencies(clusterConfigDir) {
-    console.log('Installing general dependencies...');
+    console.log('Installing EKS general dependencies...');
     
     const commands = `cd ${clusterConfigDir} && bash -c 'source init_envs && source stack_envs && 
     
-    # kubectl apply -f https://example.com/manifest.yaml
-    # curl -fsSL https://example.com/install.sh | bash
-    # helm repo add myrepo https://example.com/charts
-    # helm install myapp myrepo/myapp --namespace mynamespace --create-namespace
+    # 安装S3 CSI驱动程序
+    echo "=== Installing S3 CSI Driver ==="
     
-    echo "General dependencies installation completed"
+    # 获取账户ID
+    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+    ROLE_NAME=SM_HP_S3_CSI_ROLE_$EKS_CLUSTER_NAME
+    
+    # 创建IAM服务账户和角色
+    echo "Creating IAM service account for S3 CSI driver..."
+    eksctl create iamserviceaccount \\
+        --name s3-csi-driver-sa \\
+        --namespace kube-system \\
+        --override-existing-serviceaccounts \\
+        --cluster $EKS_CLUSTER_NAME \\
+        --attach-policy-arn arn:aws:iam::aws:policy/AmazonS3FullAccess \\
+        --role-name $ROLE_NAME \\
+        --approve \\
+        --role-only || echo "S3 CSI service account already exists"
+    
+    # 获取角色ARN
+    ROLE_ARN=$(aws iam get-role --role-name $ROLE_NAME --query "Role.Arn" --output text)
+    
+    # 安装S3 CSI驱动程序addon
+    echo "Installing S3 CSI driver addon..."
+    eksctl create addon \\
+        --name aws-mountpoint-s3-csi-driver \\
+        --cluster $EKS_CLUSTER_NAME \\
+        --service-account-role-arn $ROLE_ARN \\
+        --force || echo "S3 CSI driver addon already exists"
+    
+    echo "S3 CSI Driver installation completed"
+    
+    # 安装KubeRay Operator（用于Ray训练，不依赖HyperPod）
+    echo "=== Installing KubeRay Operator ==="
+    helm repo add kuberay https://ray-project.github.io/kuberay-helm/
+    helm repo update
+    helm install kuberay-operator kuberay/kuberay-operator --version 1.2.0 --namespace kube-system || echo "KubeRay Operator already exists"
+    
+    echo "EKS general dependencies installation completed"
     '`;
     
     execSync(commands, { stdio: 'inherit' });
@@ -286,11 +319,11 @@ helm upgrade --install hyperpod-dependencies ./sagemaker-hyperpod-cli/helm_chart
   }
 
   /**
-   * 完整的集群依赖配置流程
+   * EKS集群基础依赖配置流程（不包含HyperPod专用依赖）
    */
   static async configureClusterDependencies(clusterTag, clusterManager) {
     try {
-      console.log(`Configuring dependencies for cluster: ${clusterTag}`);
+      console.log(`Configuring EKS cluster dependencies for: ${clusterTag}`);
       
       // 获取集群配置目录
       const clusterDir = clusterManager.getClusterDir(clusterTag);
@@ -310,16 +343,14 @@ helm upgrade --install hyperpod-dependencies ./sagemaker-hyperpod-cli/helm_chart
       // 3. 安装helm依赖
       await this.installHelmDependencies(configDir);
       
-      // 4. 安装通用依赖
+      // 4. 安装通用依赖（仅EKS相关）
       await this.installGeneralDependencies(configDir);
-
-      await this.installHyperPodDependencies(configDir);
       
-      console.log(`Successfully configured dependencies for cluster: ${clusterTag}`);
+      console.log(`Successfully configured EKS cluster dependencies for: ${clusterTag}`);
       return { success: true };
       
     } catch (error) {
-      console.error(`Error configuring dependencies for cluster ${clusterTag}:`, error);
+      console.error(`Error configuring EKS cluster dependencies for ${clusterTag}:`, error);
       throw error;
     }
   }

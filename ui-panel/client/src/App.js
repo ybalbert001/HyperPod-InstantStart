@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Layout, Row, Col, Card, message, Tabs, Space, Badge, Typography } from 'antd';
 import { ContainerOutlined, ApiOutlined, RocketOutlined, ExperimentOutlined, DatabaseOutlined, CloudServerOutlined, SettingOutlined } from '@ant-design/icons';
 import ThemeProvider from './components/ThemeProvider';
@@ -362,7 +362,7 @@ function App() {
     };
   }, []);
 
-  const fetchClusterStatus = async () => {
+  const fetchClusterStatus = useCallback(async () => {
     try {
       console.log('Fetching cluster status...');
       const response = await fetch('/api/cluster-status');
@@ -373,12 +373,12 @@ function App() {
       console.error('Error fetching cluster status:', error);
       message.error('Failed to fetch cluster status');
     }
-  };
+  }, []); // 空依赖数组，因为函数内部没有依赖外部变量
 
   // 配置：是否使用 V2 API（可以通过环境变量或配置文件控制）
   const USE_V2_API = true; // 默认使用 V2 API
 
-  const fetchPodsAndServices = async () => {
+  const fetchPodsAndServices = useCallback(async () => {
     try {
       setRefreshing(true);
       console.log(`Fetching pods and services using ${USE_V2_API ? 'V2' : 'V1'} API...`);
@@ -427,7 +427,7 @@ function App() {
     } finally {
       setRefreshing(false);
     }
-  };
+  }, []); // 空依赖数组
 
   const handleDeploy = async (config) => {
     console.log('🚀 handleDeploy called with config:', config);

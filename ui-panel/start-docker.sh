@@ -56,6 +56,7 @@ docker run -d \
   -v $(pwd)/.env:/app/.env \
   -v $(pwd)/package.json:/app/package.json \
   -v $(pwd)/nodemon.json:/app/nodemon.json \
+  -v ~/workspace/s3:/s3-workspace-metadata \
   -v ~/.kube:/home/node/.kube:rw \
   -v ~/.aws:/home/node/.aws:ro \
   -e NODE_ENV=development \

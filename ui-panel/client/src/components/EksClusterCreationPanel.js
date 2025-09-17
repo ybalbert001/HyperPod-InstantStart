@@ -51,7 +51,7 @@ const EksClusterCreationPanel = () => {
           console.log('✅ Restoring cluster:', clusterTag, clusterInfo);
           
           const restoredStatus = {
-            status: 'IN_PROGRESS',
+            status: clusterInfo.status || 'IN_PROGRESS', // 使用实际状态
             clusterTag: clusterTag,
             stackName: clusterInfo.stackName,
             stackId: clusterInfo.stackId,
@@ -163,9 +163,12 @@ const EksClusterCreationPanel = () => {
   };
 
   // 创建集群
-  const handleCreateCluster = async (values) => {
-    setLoading(true);
+  const handleCreateCluster = async () => {
     try {
+      // 验证表单
+      const values = await form.validateFields();
+      
+      setLoading(true);
       console.log('Creating cluster with values:', values);
       
       // 同步获取有效的CIDR
@@ -200,7 +203,6 @@ const EksClusterCreationPanel = () => {
     } catch (error) {
       console.error('Failed to create cluster:', error);
       message.error(`Failed to create cluster: ${error.message}`);
-    } finally {
       setLoading(false);
     }
   };
@@ -251,7 +253,6 @@ const EksClusterCreationPanel = () => {
             <Form
               form={form}
               layout="vertical"
-              onFinish={handleCreateCluster}
               disabled={loading || creationStatus?.status === 'IN_PROGRESS'}
             >
               {/* 基本配置 */}
@@ -283,7 +284,7 @@ const EksClusterCreationPanel = () => {
                 <Space>
                   <Button
                     type="primary"
-                    htmlType="submit"
+                    onClick={handleCreateCluster}
                     loading={loading}
                     icon={<PlayCircleOutlined />}
                     size="large"

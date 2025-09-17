@@ -10,6 +10,21 @@ const S3StorageManager = ({ onStorageChange }) => {
   const [storages, setStorages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [createLoading, setCreateLoading] = useState(false);
+  const [defaultsLoaded, setDefaultsLoaded] = useState(false);
+
+  // 获取默认值
+  const fetchDefaults = async () => {
+    try {
+      const response = await fetch('/api/s3-storage-defaults');
+      const result = await response.json();
+      if (result.success && result.defaults) {
+        form.setFieldsValue(result.defaults);
+        setDefaultsLoaded(true);
+      }
+    } catch (error) {
+      console.error('Error fetching S3 storage defaults:', error);
+    }
+  };
 
   // 获取S3存储列表
   const fetchStorages = async () => {
@@ -83,6 +98,7 @@ const S3StorageManager = ({ onStorageChange }) => {
 
   useEffect(() => {
     fetchStorages();
+    fetchDefaults(); // 获取默认值
     
     // 注册全局刷新监听
     const componentId = 's3-storage-manager';
@@ -170,7 +186,7 @@ const S3StorageManager = ({ onStorageChange }) => {
                   label="Storage Name"
                   rules={[{ required: true, message: 'Please input storage name' }]}
                 >
-                  <Input placeholder="e.g., models-storage" />
+                  <Input placeholder="Default: s3-claim" />
                 </Form.Item>
               </Col>
               <Col span={8}>
@@ -179,7 +195,7 @@ const S3StorageManager = ({ onStorageChange }) => {
                   label="S3 Bucket Name"
                   rules={[{ required: true, message: 'Please input S3 bucket name' }]}
                 >
-                  <Input placeholder="e.g., my-model-bucket" />
+                  <Input placeholder="Auto-detected from container" />
                 </Form.Item>
               </Col>
               <Col span={8}>
@@ -187,9 +203,8 @@ const S3StorageManager = ({ onStorageChange }) => {
                   name="region"
                   label="AWS Region"
                   rules={[{ required: true, message: 'Please input AWS region' }]}
-                  initialValue="us-west-2"
                 >
-                  <Input placeholder="e.g., us-west-2" />
+                  <Input placeholder="Default: us-west-2" />
                 </Form.Item>
               </Col>
             </Row>
