@@ -669,9 +669,11 @@ app.post('/api/deploy', async (req, res) => {
       vllmCommand,
       ollamaModelId,
       gpuCount,
+      instanceType = 'ml.g6.12xlarge',
       isExternal = true,
       deploymentName,  // 用户输入的部署名称
-      dockerImage = 'vllm/vllm-openai:latest'
+      dockerImage = 'vllm/vllm-openai:latest',
+      deployAsPool = false  // 新增：是否部署为模型池
     } = req.body;
 
     console.log('Inference deployment request:', { 
@@ -680,7 +682,8 @@ app.post('/api/deploy', async (req, res) => {
       ollamaModelId, 
       replicas, 
       isExternal,
-      dockerImage
+      dockerImage,
+      deployAsPool
     });
 
     // 生成带时间戳的唯一标签（符合Kubernetes命名规范）
@@ -709,6 +712,7 @@ app.post('/api/deploy', async (req, res) => {
         .replace(/OLLAMA_MODEL_ID/g, ollamaModelId)
         .replace(/REPLICAS_COUNT/g, replicas.toString())
         .replace(/GPU_COUNT/g, gpuCount.toString())
+        .replace(/INSTANCE_TYPE/g, instanceType)
         .replace(/NLB_ANNOTATIONS/g, nlbAnnotations);
       
     } else {
@@ -727,7 +731,15 @@ app.post('/api/deploy', async (req, res) => {
       }
       console.log(`Using service engine: ${servEngine} for command type: ${parsedCommand.commandType}`);
 
-      templatePath = path.join(__dirname, '../templates/vllm-sglang-template.yaml');
+      // 根据deployAsPool选择模板
+      if (deployAsPool) {
+        templatePath = path.join(__dirname, '../templates/vllm-sglang-model-pool-template.yaml');
+        console.log('Using model pool template (no service will be created)');
+      } else {
+        templatePath = path.join(__dirname, '../templates/vllm-sglang-template.yaml');
+        console.log('Using standard template (with service)');
+      }
+      
       const templateContent = await fs.readFile(templatePath, 'utf8');
       
       // 生成HuggingFace token环境变量（如果提供了token）
@@ -744,6 +756,7 @@ app.post('/api/deploy', async (req, res) => {
         .replace(/MODEL_TAG/g, finalDeploymentTag)
         .replace(/REPLICAS_COUNT/g, replicas.toString())
         .replace(/GPU_COUNT/g, gpuCount.toString())
+        .replace(/INSTANCE_TYPE/g, instanceType)
         .replace(/HF_TOKEN_ENV/g, hfTokenEnv)
         .replace(/VLLM_COMMAND/g, JSON.stringify(parsedCommand.fullCommand))
         .replace(/DOCKER_IMAGE/g, dockerImage)
@@ -757,7 +770,8 @@ app.post('/api/deploy', async (req, res) => {
     }
     
     const accessType = isExternal ? 'external' : 'internal';
-    const tempYamlPath = path.join(deploymentsDir, `${finalDeploymentTag}-${deploymentType}-${accessType}.yaml`);
+    const poolType = deployAsPool ? 'pool' : 'standard';
+    const tempYamlPath = path.join(deploymentsDir, `${finalDeploymentTag}-${deploymentType}-${poolType}-${accessType}.yaml`);
     await fs.writeFile(tempYamlPath, newYamlContent);
     
     console.log(`Generated YAML saved to: ${tempYamlPath}`);
@@ -766,10 +780,14 @@ app.post('/api/deploy', async (req, res) => {
     const applyOutput = await executeKubectl(`apply -f ${tempYamlPath}`);
     
     // 广播部署状态更新
+    const deploymentMessage = deployAsPool 
+      ? `Successfully deployed model pool: ${finalDeploymentTag}` 
+      : `Successfully deployed: ${finalDeploymentTag} (${accessType} access)`;
+      
     broadcast({
       type: 'deployment',
       status: 'success',
-      message: `Successfully deployed: ${finalDeploymentTag} (${accessType} access)`,
+      message: deploymentMessage,
       output: applyOutput
     });
     
@@ -791,6 +809,93 @@ app.post('/api/deploy', async (req, res) => {
       type: 'deployment',
       status: 'error',
       message: `Deployment failed: ${error.message}`
+    });
+    
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// 部署业务Service
+app.post('/api/deploy-service', async (req, res) => {
+  try {
+    const {
+      serviceName,
+      modelPool,
+      businessTag,
+      isExternal = true
+    } = req.body;
+
+    console.log('Business service deployment request:', { 
+      serviceName, 
+      modelPool, 
+      businessTag, 
+      isExternal 
+    });
+
+    // 从模型池名称提取模型名称
+    let modelName = modelPool;
+    if (modelPool.includes('-pool')) {
+      // 移除-pool后缀获取模型名称
+      modelName = modelPool.replace('-pool', '');
+    }
+
+    // 生成NLB注解
+    const nlbAnnotations = generateNLBAnnotations(isExternal);
+    console.log(`Generated NLB annotations (external: ${isExternal}):`, nlbAnnotations);
+
+    // 读取业务Service模板
+    const templatePath = path.join(__dirname, '../templates/business-service-template.yaml');
+    const templateContent = await fs.readFile(templatePath, 'utf8');
+    
+    // 替换模板中的占位符
+    const newYamlContent = templateContent
+      .replace(/SERVICE_NAME/g, serviceName)
+      .replace(/BUSINESS_TAG/g, businessTag)
+      .replace(/MODEL_NAME/g, modelName)
+      .replace(/NLB_ANNOTATIONS/g, nlbAnnotations);
+    
+    // 保存到deployments目录
+    const deploymentsDir = path.join(__dirname, '../deployments');
+    if (!fs.existsSync(deploymentsDir)) {
+      fs.mkdirSync(deploymentsDir, { recursive: true });
+    }
+    
+    const accessType = isExternal ? 'external' : 'internal';
+    const tempYamlPath = path.join(deploymentsDir, `${serviceName}-service-${accessType}.yaml`);
+    await fs.writeFile(tempYamlPath, newYamlContent);
+    
+    console.log(`Generated service YAML saved to: ${tempYamlPath}`);
+    
+    // 执行kubectl apply
+    const applyOutput = await executeKubectl(`apply -f ${tempYamlPath}`);
+    
+    // 广播部署状态更新
+    broadcast({
+      type: 'service_deployment',
+      status: 'success',
+      message: `Successfully deployed business service: ${serviceName}`,
+      output: applyOutput
+    });
+    
+    res.json({
+      success: true,
+      message: `Business service ${serviceName} deployed successfully`,
+      serviceName,
+      businessTag,
+      modelName,
+      accessType
+    });
+    
+  } catch (error) {
+    console.error('Service deployment error:', error);
+    
+    broadcast({
+      type: 'service_deployment',
+      status: 'error',
+      message: `Service deployment failed: ${error.message}`
     });
     
     res.status(500).json({
@@ -2564,87 +2669,78 @@ app.post('/api/undeploy', async (req, res) => {
       });
     }
     
-    console.log(`Undeploying model: ${modelTag}, type: ${deleteType}`);
+    console.log(`Undeploying deployment: ${modelTag}, type: ${deleteType}`);
     
-    // 构建可能的资源名称
-    const possibleDeployments = [
-      `vllm-${modelTag}-inference`,
-      `sglang-${modelTag}-inference`,
-      `olm-${modelTag}-inference`,
-      `${modelTag}-inference`  // 备用格式
-    ];
-    
-    const possibleServices = [
-      `vllm-${modelTag}-nlb`,
-      `sglang-${modelTag}-nlb`,
-      `olm-${modelTag}-nlb`,
-      `${modelTag}-nlb`,
-      `${modelTag}-service`  // 备用格式
-    ];
-    
-    let deleteCommands = [];
-    let deletedResources = [];
-    
-    // 根据删除类型决定删除哪些资源
-    if (deleteType === 'all' || deleteType === 'deployment') {
-      possibleDeployments.forEach(deploymentName => {
-        deleteCommands.push(`delete deployment ${deploymentName} --ignore-not-found=true`);
-      });
-      deletedResources.push('Deployment');
-    }
-    
-    if (deleteType === 'all' || deleteType === 'service') {
-      possibleServices.forEach(serviceName => {
-        deleteCommands.push(`delete service ${serviceName} --ignore-not-found=true`);
-      });
-      deletedResources.push('Service');
-    }
-    
-    // 执行删除命令
-    const results = [];
+    let results = [];
     let actuallyDeleted = 0;
     
-    for (const command of deleteCommands) {
+    // 删除Deployment
+    if (deleteType === 'all' || deleteType === 'deployment') {
       try {
-        const output = await executeKubectl(command);
-        const success = !output.includes('not found');
+        console.log(`Executing: kubectl delete deployment ${modelTag}`);
+        const output = await executeKubectl(`delete deployment ${modelTag}`);
+        console.log(`Delete deployment output: ${output}`);
+        
         results.push({
-          command,
+          resource: 'deployment',
+          name: modelTag,
           success: true,
-          output: output.trim(),
-          actuallyDeleted: success
+          output: output.trim()
         });
-        if (success) actuallyDeleted++;
+        actuallyDeleted++;
       } catch (error) {
+        console.error(`Failed to delete deployment ${modelTag}:`, error);
         results.push({
-          command,
+          resource: 'deployment',
+          name: modelTag,
           success: false,
-          error: error.error || error.message,
-          actuallyDeleted: false
+          error: error.message
         });
       }
     }
     
-    // 等待一下让资源完全删除
-    if (actuallyDeleted > 0) {
-      console.log(`Waiting for resources to be fully deleted...`);
-      await new Promise(resolve => setTimeout(resolve, 2000));
+    // 删除对应的Service
+    if (deleteType === 'all' || deleteType === 'service') {
+      // 尝试常见的service命名模式
+      const possibleServices = [
+        modelTag.replace('-inference', '-nlb'),
+        modelTag.replace('-pool', '-nlb'),
+        `${modelTag}-nlb`,
+        `${modelTag}-service`
+      ];
+      
+      for (const serviceName of possibleServices) {
+        try {
+          console.log(`Executing: kubectl delete service ${serviceName}`);
+          const output = await executeKubectl(`delete service ${serviceName} --ignore-not-found=true`);
+          console.log(`Delete service output: ${output}`);
+          
+          if (!output.includes('not found')) {
+            results.push({
+              resource: 'service',
+              name: serviceName,
+              success: true,
+              output: output.trim()
+            });
+            actuallyDeleted++;
+          }
+        } catch (error) {
+          console.error(`Failed to delete service ${serviceName}:`, error);
+        }
+      }
     }
     
     // 广播删除状态更新
     broadcast({
       type: 'undeployment',
       status: 'success',
-      message: `Successfully deleted resources for ${modelTag} (${actuallyDeleted} resources)`,
+      message: `Successfully deleted ${actuallyDeleted} resource(s) for ${modelTag}`,
       results: results
     });
     
     res.json({
       success: true,
-      message: actuallyDeleted > 0 
-        ? `Successfully deleted ${actuallyDeleted} resource(s)` 
-        : 'No resources found to delete (may already be deleted)',
-      deletedResources: deletedResources,
+      message: `Successfully deleted ${actuallyDeleted} resource(s)`,
       results: results,
       modelTag: modelTag,
       actuallyDeleted: actuallyDeleted
@@ -2810,12 +2906,8 @@ app.get('/api/deployments', async (req, res) => {
     const servicesOutput = await executeKubectl('get services -o json');
     const services = JSON.parse(servicesOutput);
     
-    // 过滤出VLLM和Ollama相关的部署
-    const modelDeployments = deployments.items.filter(deployment => 
-      deployment.metadata.name.includes('vllm') || 
-      deployment.metadata.name.includes('olm') ||
-      deployment.metadata.name.includes('inference')
-    );
+    // 显示所有deployment，不进行过滤
+    const modelDeployments = deployments.items;
     
     // 为每个部署匹配对应的service
     const deploymentList = modelDeployments.map(deployment => {
@@ -2824,21 +2916,13 @@ app.get('/api/deployments', async (req, res) => {
         service.spec.selector?.app === appLabel
       );
       
-      // 从deployment名称提取model tag和类型
+      // 简化解析逻辑
       const deploymentName = deployment.metadata.name;
-      let modelTag = 'unknown';
-      let deploymentType = 'unknown';
+      const labels = deployment.metadata.labels || {};
       
-      if (deploymentName.startsWith('vllm-') && deploymentName.endsWith('-inference')) {
-        modelTag = deploymentName.slice(5, -10); // 移除 'vllm-' 前缀和 '-inference' 后缀
-        deploymentType = 'VLLM';
-      } else if (deploymentName.startsWith('sglang-') && deploymentName.endsWith('-inference')) {
-        modelTag = deploymentName.slice(7, -10); // 移除 'sglang-' 前缀和 '-inference' 后缀
-        deploymentType = 'SGLANG';
-      } else if (deploymentName.startsWith('olm-') && deploymentName.endsWith('-inference')) {
-        modelTag = deploymentName.slice(4, -10); // 移除 'olm-' 前缀和 '-inference' 后缀
-        deploymentType = 'Ollama';
-      }
+      // 使用deployment名称作为modelTag，从标签获取类型
+      const modelTag = deploymentName;
+      const deploymentType = labels['model-type'] || 'Others';
       
       // 检查是否为external访问
       const isExternal = matchingService?.metadata?.annotations?.['service.beta.kubernetes.io/aws-load-balancer-scheme'] === 'internet-facing';

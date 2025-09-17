@@ -3,6 +3,7 @@ import { Layout, Row, Col, Card, message, Tabs, Space, Badge, Typography } from 
 import { ContainerOutlined, ApiOutlined, RocketOutlined, ExperimentOutlined, DatabaseOutlined, CloudServerOutlined, SettingOutlined } from '@ant-design/icons';
 import ThemeProvider from './components/ThemeProvider';
 import ConfigPanel from './components/ConfigPanel';
+import ServiceConfigPanel from './components/ServiceConfigPanel';
 import ClusterStatusV2 from './components/ClusterStatusV2';
 import TestPanel from './components/TestPanel';
 import StatusMonitor from './components/StatusMonitor';
@@ -39,6 +40,7 @@ function App() {
   const [connectionStatus, setConnectionStatus] = useState('connecting');
   const [refreshing, setRefreshing] = useState(false);
   const [activeMainTab, setActiveMainTab] = useState('model-management'); // 新增主标签状态
+  const [inferenceSubTab, setInferenceSubTab] = useState('model-config'); // 新增Inference子标签状态
 
   const connectWebSocket = () => {
     console.log('Attempting to connect to WebSocket...');
@@ -464,6 +466,36 @@ function App() {
     }
   };
 
+  const handleServiceDeploy = async (config) => {
+    console.log('🚀 handleServiceDeploy called with config:', config);
+    try {
+      const response = await fetch('/api/deploy-service', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(config),
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        message.success('Business service deployed successfully!');
+        // 触发操作刷新
+        operationRefreshManager.triggerOperationRefresh('service-deploy', {
+          serviceName: config.serviceName,
+          timestamp: new Date().toISOString(),
+          source: 'service-config-panel'
+        });
+      } else {
+        message.error(`Service deployment failed: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('❌ Error deploying service:', error);
+      message.error('Failed to deploy service');
+    }
+  };
+
   const handleTrainingLaunch = async (config) => {
     try {
       console.log('Launching training job with config:', config);
@@ -628,35 +660,70 @@ function App() {
             <ClusterManagement />
           </div>
 
-          <Row gutter={[16, 16]} style={{ display: activeMainTab === 'inference' ? 'flex' : 'none' }}>
-            {/* Inference - 左侧：模型配置 */}
-            <Col xs={24} lg={12}>
-              <Card 
-                title="Model Configuration" 
-                className="theme-card compute"
-                style={{ height: '50vh', overflow: 'auto' }}
-              >
-                <ConfigPanel 
-                  onDeploy={handleDeploy}
-                  deploymentStatus={deploymentStatus}
-                />
-              </Card>
-            </Col>
-            
-            {/* Inference - 右侧：模型测试 */}
-            <Col xs={24} lg={12}>
-              <Card 
-                title="Model Testing"
-                className="theme-card ml"
-                style={{ height: '50vh', overflow: 'auto' }}
-              >
-                <TestPanel 
-                  services={services} 
-                  onRefresh={fetchPodsAndServices}
-                />
-              </Card>
-            </Col>
-          </Row>
+          <div style={{ display: activeMainTab === 'inference' ? 'block' : 'none' }}>
+            <Tabs 
+              activeKey={inferenceSubTab} 
+              onChange={setInferenceSubTab}
+              style={{ marginBottom: 16 }}
+              items={[
+                {
+                  key: 'model-config',
+                  label: 'Model Configuration',
+                  children: (
+                    <Row gutter={[16, 16]}>
+                      <Col xs={24} lg={12}>
+                        <Card 
+                          title="Model Configuration" 
+                          className="theme-card compute"
+                          style={{ height: '50vh', overflow: 'auto' }}
+                        >
+                          <ConfigPanel 
+                            onDeploy={handleDeploy}
+                            deploymentStatus={deploymentStatus}
+                          />
+                        </Card>
+                      </Col>
+                      <Col xs={24} lg={12}>
+                        <Card 
+                          title="Model Testing"
+                          className="theme-card ml"
+                          style={{ height: '50vh', overflow: 'auto' }}
+                        >
+                          <TestPanel 
+                            services={services} 
+                            onRefresh={fetchPodsAndServices}
+                          />
+                        </Card>
+                      </Col>
+                    </Row>
+                  )
+                },
+                {
+                  key: 'service-config',
+                  label: 'Service Configuration',
+                  children: (
+                    <Row gutter={[16, 16]}>
+                      <Col xs={24} lg={12}>
+                        <ServiceConfigPanel 
+                          onDeploy={handleServiceDeploy}
+                          deploymentStatus={deploymentStatus}
+                        />
+                      </Col>
+                      <Col xs={24} lg={12}>
+                        <Card 
+                          title="Service Management"
+                          className="theme-card ml"
+                          style={{ height: '50vh', overflow: 'auto' }}
+                        >
+                          <DeploymentManager />
+                        </Card>
+                      </Col>
+                    </Row>
+                  )
+                }
+              ]}
+            />
+          </div>
           
           <Row gutter={[16, 16]} style={{ display: activeMainTab === 'training' ? 'flex' : 'none' }}>
             {/* Training - 左侧：训练配置 */}

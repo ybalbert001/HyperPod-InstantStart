@@ -17,6 +17,8 @@ spec:
       labels:
         app: olm-MODEL_TAG-inference
     spec:
+      nodeSelector:
+        beta.kubernetes.io/instance-type: INSTANCE_TYPE
       containers:
         - name: ollama
           image: ollama/ollama:latest

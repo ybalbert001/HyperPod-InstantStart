@@ -75,8 +75,8 @@ const GlobalRefreshButton = ({ style = {} }) => {
       setLastRefreshResult(result);
       
       if (result.success) {
-        const successCount = result.results.length;
-        const errorCount = result.errors.length;
+        const successCount = (result.results || []).length;
+        const errorCount = (result.errors || []).length;
         
         if (errorCount === 0) {
           message.success(`All ${successCount} components refreshed successfully`);
@@ -244,7 +244,7 @@ const GlobalRefreshButton = ({ style = {} }) => {
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <Text>Components:</Text>
-                  <Text>{lastRefreshResult.results.length} success, {lastRefreshResult.errors.length} errors</Text>
+                  <Text>{(lastRefreshResult.results || []).length} success, {(lastRefreshResult.errors || []).length} errors</Text>
                 </div>
               </Space>
             </div>

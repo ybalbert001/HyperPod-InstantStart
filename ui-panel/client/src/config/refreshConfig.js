@@ -24,6 +24,7 @@ export const REFRESH_CONFIG = {
     'training-monitor': 8,            // 高优先级 - 训练监控
     'deployment-manager': 7,          // 高优先级 - 部署管理
     'nodegroup-manager': 7,           // 高优先级 - 节点组管理
+    'eks-cluster-creation': 7,        // 高优先级 - EKS集群创建状态检查
     's3-storage-manager': 6,          // 中高优先级 - S3存储管理
     'training-history': 6,            // 中高优先级 - 训练历史
     'status-monitor': 4,              // 中优先级 - 状态监控（已被app-status替代）
@@ -49,7 +50,7 @@ export const REFRESH_CONFIG = {
       ]
     },
     'model-deploy': {
-      immediate: ['deployment-manager', 'status-monitor', 'pods-services'],
+      immediate: ['status-monitor', 'pods-services'],
       delayed: [
         { components: ['status-monitor', 'cluster-status'], delay: 3000 },
         { components: ['all'], delay: 10000 }

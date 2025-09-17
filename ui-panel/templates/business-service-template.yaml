@@ -1,0 +1,20 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: SERVICE_NAME-nlb
+  labels:
+    business: "BUSINESS_TAG"
+    model: "MODEL_NAME"
+    service-type: "business-service"
+  annotations:NLB_ANNOTATIONS
+spec:
+  selector:
+    model: "MODEL_NAME"
+    business: "BUSINESS_TAG"
+  type: LoadBalancer
+  ports:
+    - port: 8000
+      protocol: TCP
+      targetPort: http
+      name: http

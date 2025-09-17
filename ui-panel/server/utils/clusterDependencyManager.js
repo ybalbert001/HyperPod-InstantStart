@@ -130,9 +130,7 @@ helm upgrade --install hyperpod-dependencies ./sagemaker-hyperpod-cli/helm_chart
     execSync(installCmd, { stdio: 'inherit' });
   }
 
-  /**
-   * 安装EKS通用依赖（不包含HyperPod专用组件）
-   */
+
   static async installGeneralDependencies(clusterConfigDir) {
     console.log('Installing EKS general dependencies...');
     
@@ -181,6 +179,48 @@ helm upgrade --install hyperpod-dependencies ./sagemaker-hyperpod-cli/helm_chart
     
     execSync(commands, { stdio: 'inherit' });
   }
+
+  static async installnlbDependencies(clusterConfigDir) {
+    console.log('Installing NLB dependencies...');
+    
+    const commands = `cd ${clusterConfigDir} && bash -c 'source init_envs && source stack_envs && 
+    
+    # 下载ALB IAM策略
+    curl -o /tmp/alb-iam-policy.json https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.13.0/docs/install/iam_policy.json
+
+    # 创建IAM策略（如果不存在）
+    aws iam create-policy \\
+        --policy-name AWSLoadBalancerControllerIAMPolicy \\
+        --policy-document file:///tmp/alb-iam-policy.json || echo "Policy already exists"
+
+    # 创建IAM服务账户
+    eksctl create iamserviceaccount \\
+      --cluster=$EKS_CLUSTER_NAME \\
+      --namespace=kube-system \\
+      --name=aws-load-balancer-controller \\
+      --attach-policy-arn=arn:aws:iam::\$(aws sts get-caller-identity --query Account --output text):policy/AWSLoadBalancerControllerIAMPolicy \\
+      --override-existing-serviceaccounts \\
+      --region=$AWS_REGION \\
+      --approve || echo "Service account already exists"
+
+    # 获取公有子网并添加ELB标签
+    echo "Tagging public subnets for ELB..."
+    PUBLIC_SUBNETS=\$(aws ec2 describe-subnets \\
+        --filters "Name=vpc-id,Values=\${VPC_ID}" "Name=map-public-ip-on-launch,Values=true" \\
+        --query "Subnets[*].SubnetId" \\
+        --output text)
+    
+    for SUBNET_ID in \$PUBLIC_SUBNETS; do
+        echo "Tagging public subnet: \$SUBNET_ID"
+        aws ec2 create-tags --resources \$SUBNET_ID --tags Key=kubernetes.io/role/elb,Value=1 || echo "Failed to tag \$SUBNET_ID"
+    done
+
+    echo "NLB dependencies installation completed"
+    '`;
+    
+    execSync(commands, { stdio: 'inherit' });
+  }
+
 
 
   static async installCertificationDependency(clusterConfigDir) {
@@ -291,6 +331,8 @@ helm upgrade --install hyperpod-dependencies ./sagemaker-hyperpod-cli/helm_chart
       await this.configureKubectlAndOIDC(configDir);
       
       await this.installHelmDependencies(configDir);
+
+      await this.installnlbDependencies(configDir);
 
       await this.installCertificationDependency(configDir);
       

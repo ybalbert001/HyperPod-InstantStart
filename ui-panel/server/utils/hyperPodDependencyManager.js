@@ -86,8 +86,10 @@ class HyperPodDependencyManager {
     aws eks create-addon \\
         --cluster-name \$EKS_CLUSTER_NAME \\
         --addon-name amazon-sagemaker-hyperpod-training-operator \\
-        --region \$AWS_REGION \\
-        --resolve-conflicts OVERWRITE || echo "HyperPod Training Operator addon already exists"
+        --region \$AWS_REGION
+    
+    
+    #    --resolve-conflicts OVERWRITE || echo "HyperPod Training Operator addon already exists"
 
     echo "=== All HyperPod dependencies installed successfully ==="
     '`;

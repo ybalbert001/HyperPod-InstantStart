@@ -188,10 +188,15 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
       form={vllmForm}
       layout="vertical"
       onFinish={handleSubmit}
+      onFinishFailed={(errorInfo) => {
+        console.log('VLLM Form validation failed:', errorInfo);
+      }}
       initialValues={{
         replicas: 1,
         gpuCount: 1,
+        instanceType: 'ml.g6.12xlarge',
         isExternal: true,
+        deployAsPool: false,
         deploymentName: '',
         dockerImage: '', // 改为空，用户必须选择
         vllmCommand: '' // 命令也为空，等待用户选择镜像后自动填充
@@ -221,7 +226,7 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
       </Form.Item>
 
       <Row gutter={16}>
-        <Col span={12}>
+        <Col span={8}>
           <Form.Item
             label={
               <Space>
@@ -244,7 +249,7 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
             />
           </Form.Item>
         </Col>
-        <Col span={12}>
+        <Col span={8}>
           <Form.Item
             label={
               <Space>
@@ -265,6 +270,27 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
               max={8} 
               style={{ width: '100%' }}
               placeholder="Number of GPUs per replica"
+            />
+          </Form.Item>
+        </Col>
+        <Col span={8}>
+          <Form.Item
+            label={
+              <Space>
+                Instance Type
+                <Tooltip title="EC2 instance type for node selector">
+                  <InfoCircleOutlined />
+                </Tooltip>
+              </Space>
+            }
+            name="instanceType"
+            rules={[
+              { required: true, message: 'Please input instance type!' }
+            ]}
+          >
+            <Input 
+              placeholder="e.g., ml.g6.12xlarge"
+              style={{ fontFamily: 'monospace' }}
             />
           </Form.Item>
         </Col>
@@ -329,17 +355,39 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={12}>
           <Form.Item>
-            <Button 
-              type="primary" 
-              htmlType="submit" 
-              loading={loading}
-              icon={<RocketOutlined />}
-              size="large"
-              block
-              className="deploy-btn"
+            <Form.Item
+              name="deployAsPool"
+              valuePropName="checked"
+              style={{ marginBottom: 8 }}
             >
-              {loading ? 'Deploying VLLM Model...' : 'Deploy VLLM Model'}
-            </Button>
+              <Checkbox>
+                <Space>
+                  <ThunderboltOutlined />
+                  <span>Deploy as Model Pool</span>
+                  <Tooltip title="Create a model pool for dynamic service allocation. Pods can be assigned to different services later.">
+                    <InfoCircleOutlined />
+                  </Tooltip>
+                </Space>
+              </Checkbox>
+            </Form.Item>
+            <Form.Item dependencies={['deployAsPool']}>
+              {({ getFieldValue }) => (
+                <Button 
+                  type="primary" 
+                  htmlType="submit" 
+                  loading={loading}
+                  icon={<RocketOutlined />}
+                  size="large"
+                  block
+                  className="deploy-btn"
+                >
+                  {loading 
+                    ? (getFieldValue('deployAsPool') ? 'Deploying Model Pool...' : 'Deploying Model...') 
+                    : (getFieldValue('deployAsPool') ? 'Deploy Model Pool' : 'Deploy Model')
+                  }
+                </Button>
+              )}
+            </Form.Item>
           </Form.Item>
         </Col>
         <Col span={12}>

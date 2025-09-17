@@ -2,20 +2,19 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: SERVENGINE-MODEL_TAG-inference
+  name: SERVENGINE-MODEL_TAG-pool
   labels:
-    app: SERVENGINE-MODEL_TAG-inference
-    model-type: "SERVENGINE"
-    deployment-tag: "MODEL_TAG"
+    model: "MODEL_TAG"
 spec:
   replicas: REPLICAS_COUNT
   selector:
     matchLabels:
-      app: SERVENGINE-MODEL_TAG-inference
+      model: "MODEL_TAG"
   template:
     metadata:
       labels:
-        app: SERVENGINE-MODEL_TAG-inference
+        model: "MODEL_TAG"
+        business: unassigned
     spec:
       nodeSelector:
         beta.kubernetes.io/instance-type: INSTANCE_TYPE
@@ -64,17 +63,3 @@ spec:
         - key: "nvidia.com/gpu"
           operator: "Exists"
           effect: "NoSchedule"
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: SERVENGINE-MODEL_TAG-nlb
-  annotations:NLB_ANNOTATIONS
-spec:
-  ports:
-    - port: 8000
-      protocol: TCP
-      targetPort: http
-  selector:
-    app: SERVENGINE-MODEL_TAG-inference
-  type: LoadBalancer

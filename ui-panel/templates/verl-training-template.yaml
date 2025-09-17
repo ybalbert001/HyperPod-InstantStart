@@ -16,6 +16,8 @@ spec:
         dashboard-port: '8265'
       template:
         spec:
+          nodeSelector:
+            beta.kubernetes.io/instance-type: INSTANCE_TYPE
           containers:
           - name: ray-head
             image: DOCKER_IMAGE

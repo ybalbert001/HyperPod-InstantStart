@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import globalRefreshManager from '../hooks/useGlobalRefresh';
 import {
   Card,
   Form,
@@ -218,6 +219,27 @@ const EksClusterCreationPanel = () => {
     // 恢复创建状态（如果有的话）
     restoreCreationStatus();
   }, []);
+
+  // 集成全局刷新系统
+  useEffect(() => {
+    const componentId = 'eks-cluster-creation';
+    
+    const refreshFunction = async () => {
+      if (creationStatus?.clusterTag) {
+        await checkCreationStatus(creationStatus.clusterTag);
+      } else {
+        await restoreCreationStatus();
+      }
+    };
+
+    globalRefreshManager.subscribe(componentId, refreshFunction, {
+      priority: 7
+    });
+
+    return () => {
+      globalRefreshManager.unsubscribe(componentId);
+    };
+  }, [creationStatus]);
 
   // 获取当前步骤
   const getCurrentStep = () => {
