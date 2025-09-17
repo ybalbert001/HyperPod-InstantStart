@@ -69,6 +69,9 @@ apiVersion: v1
 kind: Service
 metadata:
   name: SERVENGINE-MODEL_TAG-nlb
+  labels:
+    model-type: "SERVENGINE"
+    deployment-tag: "MODEL_TAG"
   annotations:NLB_ANNOTATIONS
 spec:
   ports:

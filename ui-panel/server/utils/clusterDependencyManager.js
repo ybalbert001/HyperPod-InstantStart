@@ -188,7 +188,9 @@ helm upgrade --install hyperpod-dependencies ./sagemaker-hyperpod-cli/helm_chart
     # 下载ALB IAM策略
     curl -o /tmp/alb-iam-policy.json https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.13.0/docs/install/iam_policy.json
 
-    # 创建IAM策略（如果不存在）
+    policy_arn="arn:aws:iam::${ACCOUNT_ID}:policy/AWSLoadBalancerControllerIAMPolicy"
+    execute_aws_command "aws iam delete-policy --policy-arn $policy_arn"
+
     aws iam create-policy \\
         --policy-name AWSLoadBalancerControllerIAMPolicy \\
         --policy-document file:///tmp/alb-iam-policy.json || echo "Policy already exists"
@@ -201,7 +203,13 @@ helm upgrade --install hyperpod-dependencies ./sagemaker-hyperpod-cli/helm_chart
       --attach-policy-arn=arn:aws:iam::\$(aws sts get-caller-identity --query Account --output text):policy/AWSLoadBalancerControllerIAMPolicy \\
       --override-existing-serviceaccounts \\
       --region=$AWS_REGION \\
-      --approve || echo "Service account already exists"
+      --approve 2>/dev/null || echo "ServiceAccount already exists or creation skipped"
+
+    # 确保ServiceAccount有正确的IAM角色注解
+    ACCOUNT_ID=\$(aws sts get-caller-identity --query Account --output text)
+    kubectl annotate serviceaccount aws-load-balancer-controller -n kube-system \\
+      eks.amazonaws.com/role-arn=arn:aws:iam::\$ACCOUNT_ID:role/eksctl-\$EKS_CLUSTER_NAME-addon-iamserviceaccount-kube-system-aws-load-balancer-controller \\
+      --overwrite 2>/dev/null || echo "ServiceAccount annotation skipped"
 
     # 获取公有子网并添加ELB标签
     echo "Tagging public subnets for ELB..."
@@ -212,8 +220,18 @@ helm upgrade --install hyperpod-dependencies ./sagemaker-hyperpod-cli/helm_chart
     
     for SUBNET_ID in \$PUBLIC_SUBNETS; do
         echo "Tagging public subnet: \$SUBNET_ID"
-        aws ec2 create-tags --resources \$SUBNET_ID --tags Key=kubernetes.io/role/elb,Value=1 || echo "Failed to tag \$SUBNET_ID"
+        aws ec2 create-tags --resources \$SUBNET_ID --tags Key=kubernetes.io/role/elb,Value=1 2>/dev/null || echo "Failed to tag \$SUBNET_ID"
     done
+
+    # 安装或升级AWS Load Balancer Controller
+    # helm uninstall aws-load-balancer-controller -n kube-system
+    helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \\
+      -n kube-system \\
+      --set clusterName=$EKS_CLUSTER_NAME \\
+      --set serviceAccount.create=false \\
+      --set serviceAccount.name=aws-load-balancer-controller \\
+      --set vpcId=$VPC_ID \\
+      --set region=$AWS_REGION
 
     echo "NLB dependencies installation completed"
     '`;
@@ -221,7 +239,10 @@ helm upgrade --install hyperpod-dependencies ./sagemaker-hyperpod-cli/helm_chart
     execSync(commands, { stdio: 'inherit' });
   }
 
-
+    // # 确保ServiceAccount有正确的IAM角色注解
+    // kubectl annotate serviceaccount aws-load-balancer-controller -n kube-system \\
+    //   eks.amazonaws.com/role-arn=arn:aws:iam::\$ACCOUNT_ID:role/eksctl-\$EKS_CLUSTER_NAME-addon-iamserviceaccount-kube-system-aws-load-balancer-controller \\
+    //   --overwrite || echo "Failed to annotate service account"
 
   static async installCertificationDependency(clusterConfigDir) {
     console.log('Installing certification dependencies...');
@@ -284,7 +305,7 @@ helm upgrade --install hyperpod-dependencies ./sagemaker-hyperpod-cli/helm_chart
         --cluster-name \$EKS_CLUSTER_NAME \\
         --addon-name eks-pod-identity-agent \\
         --region \$AWS_REGION \\
-        --resolve-conflicts OVERWRITE || echo "Pod Identity Agent addon already exists"
+        --resolve-conflicts OVERWRITE 2>/dev/null || echo "Pod Identity Agent addon already exists"
 
     # 4. 创建Pod Identity Association
     echo "Creating Pod Identity Association..."
@@ -293,7 +314,7 @@ helm upgrade --install hyperpod-dependencies ./sagemaker-hyperpod-cli/helm_chart
         --role-arn \$EXECUTION_ROLE \\
         --namespace aws-hyperpod \\
         --service-account hp-training-operator-controller-manager \\
-        --region \$AWS_REGION || echo "Pod Identity Association already exists"
+        --region \$AWS_REGION 2>/dev/null || echo "Pod Identity Association already exists"
 
     # 5. 创建cert-manager addon
     echo "Creating cert-manager addon..."
@@ -301,7 +322,7 @@ helm upgrade --install hyperpod-dependencies ./sagemaker-hyperpod-cli/helm_chart
         --cluster-name \$EKS_CLUSTER_NAME \\
         --addon-name cert-manager \\
         --region \$AWS_REGION \\
-        --resolve-conflicts OVERWRITE || echo "cert-manager addon already exists"
+        --resolve-conflicts OVERWRITE 2>/dev/null || echo "cert-manager addon already exists"
 
     echo "Waiting for cert-manager to be ready..."
     sleep 60

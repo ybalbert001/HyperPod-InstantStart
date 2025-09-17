@@ -78,33 +78,36 @@ Pod: vllm-qwen-06b-pool-xxx (business标签动态变化)
 - 动态按钮文字切换
 - 表单验证和提交逻辑
 
-### **2. Service Configuration标签页** ✅ 已完成
+### **2. 配置标签页整合** ✅ 已完成
 
-在Inference主标签页下添加子标签页结构：
+在Inference页面左侧配置区域内部添加标签页切换：
 
 ```javascript
-<Tabs 
-  activeKey={inferenceSubTab} 
-  onChange={setInferenceSubTab}
-  items={[
-    {
-      key: 'model-config',
-      label: 'Model Configuration',
-      children: <ConfigPanel />
-    },
-    {
-      key: 'service-config', 
-      label: 'Service Configuration',
-      children: <ServiceConfigPanel />
-    }
-  ]}
-/>
+<Card title="Configuration" className="theme-card compute">
+  <Tabs 
+    activeKey={configTab} 
+    onChange={setConfigTab}
+    size="small"
+    items={[
+      {
+        key: 'model-config',
+        label: 'Model Configuration',
+        children: <ConfigPanel />
+      },
+      {
+        key: 'service-config', 
+        label: 'Service Configuration',
+        children: <ServiceConfigPanel />
+      }
+    ]}
+  />
+</Card>
 ```
 
 **实现状态**: ✅ 完成
-- 创建了ServiceConfigPanel组件
-- 实现了子标签页结构
-- 集成了模型池选择和业务Service配置
+- 左侧配置区域内部标签页切换（类似Container/Ollama关系）
+- Model Configuration和Service Configuration平行切换
+- 右侧TestPanel保持完全不变
 
 ### **3. Pod分配UI (StatusMonitor增强)** 🚧 待实现
 
@@ -273,7 +276,8 @@ StatusMonitor显示模型池Pod →
 - [x] 创建ServiceConfigPanel组件
 - [x] 创建业务Service模板
 - [x] 实现业务Service部署API
-- [x] 在Inference中添加Service Configuration标签页
+- [x] 在Inference左侧配置区域添加内部标签页切换
+- [x] 实现Model Configuration和Service Configuration平行切换
 
 ### **Phase 3: 动态调度功能** 🚧 开发中
 - [ ] 在StatusMonitor中添加Pod分配UI
@@ -320,7 +324,13 @@ kubectl label pod qwen-06b-pool-xxx business=production --overwrite
 **解决**: 删除重复声明，确保函数只定义一次
 **教训**: 大文件修改时需要仔细检查是否有重复代码
 
-### **3. 部署过滤逻辑优化** ✅ 已优化
+### **4. UI结构调整** ✅ 已解决
+**问题**: 初始设计将配置功能放在页面级别的子标签页，导致右侧TestPanel重新渲染
+**解决**: 改为左侧配置区域内部的标签页切换，右侧TestPanel保持稳定
+**优势**: 
+- 避免了TestPanel的重新渲染和状态重置
+- 配置逻辑更集中，用户体验更流畅
+- 类似Container/Ollama的交互模式，用户更容易理解
 **问题**: 原有白名单过滤机制不适合显示所有部署
 **解决**: 移除名称过滤，显示所有Deployment
 **优势**: 用户可以看到完整的集群状态

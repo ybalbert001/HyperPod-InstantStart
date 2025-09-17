@@ -40,7 +40,7 @@ function App() {
   const [connectionStatus, setConnectionStatus] = useState('connecting');
   const [refreshing, setRefreshing] = useState(false);
   const [activeMainTab, setActiveMainTab] = useState('model-management'); // 新增主标签状态
-  const [inferenceSubTab, setInferenceSubTab] = useState('model-config'); // 新增Inference子标签状态
+  const [configTab, setConfigTab] = useState('model-config'); // 配置标签页状态
 
   const connectWebSocket = () => {
     console.log('Attempting to connect to WebSocket...');
@@ -661,68 +661,55 @@ function App() {
           </div>
 
           <div style={{ display: activeMainTab === 'inference' ? 'block' : 'none' }}>
-            <Tabs 
-              activeKey={inferenceSubTab} 
-              onChange={setInferenceSubTab}
-              style={{ marginBottom: 16 }}
-              items={[
-                {
-                  key: 'model-config',
-                  label: 'Model Configuration',
-                  children: (
-                    <Row gutter={[16, 16]}>
-                      <Col xs={24} lg={12}>
-                        <Card 
-                          title="Model Configuration" 
-                          className="theme-card compute"
-                          style={{ height: '50vh', overflow: 'auto' }}
-                        >
+            <Row gutter={[16, 16]}>
+              <Col xs={24} lg={12}>
+                <Card 
+                  title="Configuration" 
+                  className="theme-card compute"
+                  style={{ height: '50vh', overflow: 'auto' }}
+                >
+                  <Tabs 
+                    activeKey={configTab} 
+                    onChange={setConfigTab}
+                    size="small"
+                    items={[
+                      {
+                        key: 'model-config',
+                        label: 'Model Configuration',
+                        children: (
                           <ConfigPanel 
                             onDeploy={handleDeploy}
                             deploymentStatus={deploymentStatus}
                           />
-                        </Card>
-                      </Col>
-                      <Col xs={24} lg={12}>
-                        <Card 
-                          title="Model Testing"
-                          className="theme-card ml"
-                          style={{ height: '50vh', overflow: 'auto' }}
-                        >
-                          <TestPanel 
-                            services={services} 
-                            onRefresh={fetchPodsAndServices}
+                        )
+                      },
+                      {
+                        key: 'service-config',
+                        label: 'Service Configuration',
+                        children: (
+                          <ServiceConfigPanel 
+                            onDeploy={handleServiceDeploy}
+                            deploymentStatus={deploymentStatus}
                           />
-                        </Card>
-                      </Col>
-                    </Row>
-                  )
-                },
-                {
-                  key: 'service-config',
-                  label: 'Service Configuration',
-                  children: (
-                    <Row gutter={[16, 16]}>
-                      <Col xs={24} lg={12}>
-                        <ServiceConfigPanel 
-                          onDeploy={handleServiceDeploy}
-                          deploymentStatus={deploymentStatus}
-                        />
-                      </Col>
-                      <Col xs={24} lg={12}>
-                        <Card 
-                          title="Service Management"
-                          className="theme-card ml"
-                          style={{ height: '50vh', overflow: 'auto' }}
-                        >
-                          <DeploymentManager />
-                        </Card>
-                      </Col>
-                    </Row>
-                  )
-                }
-              ]}
-            />
+                        )
+                      }
+                    ]}
+                  />
+                </Card>
+              </Col>
+              <Col xs={24} lg={12}>
+                <Card 
+                  title="Model Testing"
+                  className="theme-card ml"
+                  style={{ height: '50vh', overflow: 'auto' }}
+                >
+                  <TestPanel 
+                    services={services} 
+                    onRefresh={fetchPodsAndServices}
+                  />
+                </Card>
+              </Col>
+            </Row>
           </div>
           
           <Row gutter={[16, 16]} style={{ display: activeMainTab === 'training' ? 'flex' : 'none' }}>
