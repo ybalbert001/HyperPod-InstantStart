@@ -906,13 +906,18 @@ const ClusterManagement = () => {
                 )
               },
               {
-                key: 'create',
+                key: 'create-eks',
                 label: (
                   <Space>
-                    <PlusOutlined />
-                    <span>Create New Pipeline</span>
+                    <CloudServerOutlined />
+                    <span>Create EKS Cluster</span>
                   </Space>
                 ),
+                children: <EksClusterCreationPanel />
+              },
+              {
+                key: 'create',
+                label: 'CreateCluster[DEPRECATED]',
                 children: (
                   <Row gutter={[24, 24]} style={{ display: 'flex', alignItems: 'stretch' }}>
                     {/* 左侧：配置表单 */}
@@ -1404,16 +1409,6 @@ const ClusterManagement = () => {
                     </Col>
                   </Row>
                 )
-              },
-              {
-                key: 'create-eks',
-                label: (
-                  <Space>
-                    <CloudServerOutlined />
-                    <span>Create EKS Cluster</span>
-                  </Space>
-                ),
-                children: <EksClusterCreationPanel />
               }
             ]}
           />
