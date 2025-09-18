@@ -195,21 +195,21 @@ helm upgrade --install hyperpod-dependencies ./sagemaker-hyperpod-cli/helm_chart
         --policy-name AWSLoadBalancerControllerIAMPolicy \\
         --policy-document file:///tmp/alb-iam-policy.json || echo "Policy already exists"
 
-    # 创建IAM服务账户
+    # 创建IAM服务账户（先删除再创建确保干净状态）
+    echo "Ensuring clean ServiceAccount state..."
+    eksctl delete iamserviceaccount --cluster=$EKS_CLUSTER_NAME --namespace=kube-system --name=aws-load-balancer-controller 2>/dev/null || echo "ServiceAccount not found, proceeding..."
+    
+    # 使用短的角色名称避免64字符限制
+    ROLE_NAME="ALB-\$EKS_CLUSTER_NAME"
+    
     eksctl create iamserviceaccount \\
       --cluster=$EKS_CLUSTER_NAME \\
       --namespace=kube-system \\
       --name=aws-load-balancer-controller \\
+      --role-name=\$ROLE_NAME \\
       --attach-policy-arn=arn:aws:iam::\$(aws sts get-caller-identity --query Account --output text):policy/AWSLoadBalancerControllerIAMPolicy \\
-      --override-existing-serviceaccounts \\
       --region=$AWS_REGION \\
-      --approve 2>/dev/null || echo "ServiceAccount already exists or creation skipped"
-
-    # 确保ServiceAccount有正确的IAM角色注解
-    ACCOUNT_ID=\$(aws sts get-caller-identity --query Account --output text)
-    kubectl annotate serviceaccount aws-load-balancer-controller -n kube-system \\
-      eks.amazonaws.com/role-arn=arn:aws:iam::\$ACCOUNT_ID:role/eksctl-\$EKS_CLUSTER_NAME-addon-iamserviceaccount-kube-system-aws-load-balancer-controller \\
-      --overwrite 2>/dev/null || echo "ServiceAccount annotation skipped"
+      --approve 2>/dev/null || echo "ServiceAccount creation failed or already exists"
 
     # 获取公有子网并添加ELB标签
     echo "Tagging public subnets for ELB..."
