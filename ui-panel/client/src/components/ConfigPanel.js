@@ -202,31 +202,8 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
         vllmCommand: '' // 命令也为空，等待用户选择镜像后自动填充
       }}
     >
-      <Form.Item
-        label={
-          <Space>
-            Replicas
-            <Tooltip title="Number of model replicas to deploy">
-              <InfoCircleOutlined />
-            </Tooltip>
-          </Space>
-        }
-        name="replicas"
-        rules={[
-          { required: true, message: 'Please input replicas count!' },
-          { type: 'number', min: 1, max: 10, message: 'Replicas must be between 1 and 10' }
-        ]}
-      >
-        <InputNumber 
-          min={1} 
-          max={10} 
-          style={{ width: '100%' }}
-          placeholder="Number of replicas"
-        />
-      </Form.Item>
-
       <Row gutter={16}>
-        <Col span={8}>
+        <Col span={12}>
           <Form.Item
             label={
               <Space>
@@ -249,7 +226,35 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
             />
           </Form.Item>
         </Col>
-        <Col span={8}>
+        <Col span={12}>
+          <Form.Item
+            label={
+              <Space>
+                <ThunderboltOutlined />
+                Replicas
+                <Tooltip title="Number of pod replicas to deploy">
+                  <InfoCircleOutlined />
+                </Tooltip>
+              </Space>
+            }
+            name="replicas"
+            rules={[
+              { required: true, message: 'Please input replica count!' },
+              { type: 'number', min: 1, max: 10, message: 'Replicas must be between 1 and 10' }
+            ]}
+          >
+            <InputNumber 
+              min={1} 
+              max={10} 
+              style={{ width: '100%' }}
+              placeholder="Number of replicas"
+            />
+          </Form.Item>
+        </Col>
+      </Row>
+
+      <Row gutter={16}>
+        <Col span={12}>
           <Form.Item
             label={
               <Space>
@@ -273,7 +278,7 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
             />
           </Form.Item>
         </Col>
-        <Col span={8}>
+        <Col span={12}>
           <Form.Item
             label={
               <Space>
@@ -370,44 +375,59 @@ const ConfigPanel = ({ onDeploy, deploymentStatus }) => {
                 </Space>
               </Checkbox>
             </Form.Item>
-            <Form.Item dependencies={['deployAsPool']}>
-              {({ getFieldValue }) => (
-                <Button 
-                  type="primary" 
-                  htmlType="submit" 
-                  loading={loading}
-                  icon={<RocketOutlined />}
-                  size="large"
-                  block
-                  className="deploy-btn"
-                >
-                  {loading 
-                    ? (getFieldValue('deployAsPool') ? 'Deploying Model Pool...' : 'Deploying Model...') 
-                    : (getFieldValue('deployAsPool') ? 'Deploy Model Pool' : 'Deploy Model')
-                  }
-                </Button>
-              )}
-            </Form.Item>
           </Form.Item>
         </Col>
         <Col span={12}>
-          <Form.Item
-            name="isExternal"
-            valuePropName="checked"
-            style={{ marginTop: 8 }}
-          >
-            <Checkbox>
-              <Space>
-                <GlobalOutlined />
-                <span>External Access</span>
-                <Tooltip title="Enable internet-facing LoadBalancer for external access. Uncheck for internal-only access.">
-                  <InfoCircleOutlined />
-                </Tooltip>
-              </Space>
-            </Checkbox>
+          <Form.Item dependencies={['deployAsPool']}>
+            {({ getFieldValue }) => (
+              <Form.Item
+                name="isExternal"
+                valuePropName="checked"
+                style={{ marginTop: 8 }}
+              >
+                <Checkbox 
+                  disabled={getFieldValue('deployAsPool')}
+                  style={{ 
+                    opacity: getFieldValue('deployAsPool') ? 0.5 : 1 
+                  }}
+                >
+                  <Space>
+                    <GlobalOutlined />
+                    <span>External Access</span>
+                    <Tooltip title={
+                      getFieldValue('deployAsPool') 
+                        ? "External Access is not applicable for Model Pool deployments. Use Service Configuration to create external services."
+                        : "Enable internet-facing LoadBalancer for external access. Uncheck for internal-only access."
+                    }>
+                      <InfoCircleOutlined />
+                    </Tooltip>
+                  </Space>
+                </Checkbox>
+              </Form.Item>
+            )}
           </Form.Item>
         </Col>
       </Row>
+
+      {/* 部署按钮 - 全宽 */}
+      <Form.Item dependencies={['deployAsPool']}>
+        {({ getFieldValue }) => (
+          <Button 
+            type="primary" 
+            htmlType="submit" 
+            loading={loading}
+            icon={<RocketOutlined />}
+            size="large"
+            block
+            className="deploy-btn"
+          >
+            {loading 
+              ? (getFieldValue('deployAsPool') ? 'Deploying Model Pool...' : 'Deploying Model...') 
+              : (getFieldValue('deployAsPool') ? 'Deploy Model Pool' : 'Deploy Model')
+            }
+          </Button>
+        )}
+      </Form.Item>
     </Form>
   );
 

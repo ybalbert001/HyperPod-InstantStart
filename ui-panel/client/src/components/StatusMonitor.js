@@ -401,6 +401,7 @@ const StatusMonitor = ({ pods, services, businessServices: propBusinessServices,
         return (
           <Badge 
             count={totalRestarts}
+            showZero={true}
             style={{ 
               backgroundColor: totalRestarts === 0 ? '#52c41a' : '#ff4d4f' 
             }}

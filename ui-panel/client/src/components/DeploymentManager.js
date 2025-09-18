@@ -9,7 +9,8 @@ import {
   Card,
   Select,
   Tooltip,
-  Modal
+  Modal,
+  Input
 } from 'antd';
 import { 
   DeleteOutlined, 
@@ -33,6 +34,10 @@ const DeploymentManager = () => {
   const [deployments, setDeployments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState({});
+  const [scaleLoading, setScaleLoading] = useState({});
+  const [scaleModalVisible, setScaleModalVisible] = useState(false);
+  const [scaleTarget, setScaleTarget] = useState(null);
+  const [targetReplicas, setTargetReplicas] = useState(1);
 
   const fetchDeployments = async (showMessage = true) => {
     // 如果是从全局刷新管理器调用，不显示loading状态（避免冲突）
@@ -110,6 +115,50 @@ const DeploymentManager = () => {
       message.error('Failed to undeploy model');
     } finally {
       setDeleteLoading(prev => ({ ...prev, [modelTag]: false }));
+    }
+  };
+
+  // 显示Scale确认对话框
+  const showScaleModal = (deployment) => {
+    setScaleTarget(deployment);
+    setTargetReplicas(deployment.replicas);
+    setScaleModalVisible(true);
+  };
+
+  // 执行Scale操作
+  const handleScale = async () => {
+    if (!scaleTarget) return;
+    
+    const deploymentName = scaleTarget.modelTag;
+    setScaleLoading(prev => ({ ...prev, [deploymentName]: true }));
+    
+    try {
+      const response = await fetch('/api/scale-deployment', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          deploymentName,
+          replicas: targetReplicas,
+          isModelPool: scaleTarget.deploymentType === 'model-pool'
+        }),
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        message.success(`Deployment ${deploymentName} scaled to ${targetReplicas} replicas`);
+        setScaleModalVisible(false);
+        fetchDeployments(); // 刷新数据
+      } else {
+        message.error(`Scale failed: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Scale error:', error);
+      message.error('Scale operation failed');
+    } finally {
+      setScaleLoading(prev => ({ ...prev, [deploymentName]: false }));
     }
   };
 
@@ -322,6 +371,15 @@ const DeploymentManager = () => {
       render: (_, record) => (
         <Space>
           <Button
+            type="default"
+            size="small"
+            icon={<ThunderboltOutlined />}
+            loading={scaleLoading[record.modelTag]}
+            onClick={() => showScaleModal(record)}
+          >
+            Scale
+          </Button>
+          <Button
             type="primary"
             danger
             size="small"
@@ -406,6 +464,47 @@ const DeploymentManager = () => {
           • Click <strong>Delete</strong> to remove both deployment and service completely
         </div>
       </div>
+      
+      {/* Scale Modal */}
+      <Modal
+        title={`Scale Deployment: ${scaleTarget?.modelTag}`}
+        open={scaleModalVisible}
+        onOk={handleScale}
+        onCancel={() => setScaleModalVisible(false)}
+        confirmLoading={scaleTarget && scaleLoading[scaleTarget.modelTag]}
+        okText="Scale"
+      >
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ marginBottom: 8 }}>
+            <strong>Current Replicas:</strong> {scaleTarget?.replicas}
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            <strong>Deployment Type:</strong> {scaleTarget?.deploymentType}
+          </div>
+          {scaleTarget?.deploymentType === 'model-pool' && (
+            <div style={{ marginBottom: 16, padding: 12, backgroundColor: '#f6f8fa', borderRadius: 4 }}>
+              <div style={{ fontSize: '12px', color: '#666' }}>
+                <strong>Model Pool Scale Rules:</strong><br/>
+                • Scale Up: New pods will be <code>unassigned</code><br/>
+                • Scale Down: Only <code>unassigned</code> pods will be removed
+              </div>
+            </div>
+          )}
+        </div>
+        <div>
+          <label style={{ display: 'block', marginBottom: 8 }}>
+            <strong>Target Replicas:</strong>
+          </label>
+          <Input
+            type="number"
+            min={0}
+            max={20}
+            value={targetReplicas}
+            onChange={(e) => setTargetReplicas(parseInt(e.target.value) || 0)}
+            style={{ width: '100%' }}
+          />
+        </div>
+      </Modal>
     </Card>
   );
 };

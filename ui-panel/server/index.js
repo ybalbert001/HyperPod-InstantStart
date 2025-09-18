@@ -3048,6 +3048,143 @@ app.delete('/api/delete-service/:serviceName', async (req, res) => {
   }
 });
 
+// Deployment Scale API
+app.post('/api/scale-deployment', async (req, res) => {
+  try {
+    const { deploymentName, replicas, isModelPool } = req.body;
+    
+    console.log(`Scaling deployment ${deploymentName} to ${replicas} replicas (Model Pool: ${isModelPool})`);
+    
+    if (isModelPool) {
+      // Model Pool的智能Scale逻辑
+      await handleModelPoolScale(deploymentName, replicas);
+    } else {
+      // 普通Deployment的直接Scale
+      const scaleCmd = `scale deployment ${deploymentName} --replicas=${replicas}`;
+      await executeKubectl(scaleCmd);
+    }
+    
+    console.log(`Deployment ${deploymentName} scaled successfully`);
+    
+    // 广播Scale更新
+    broadcast({
+      type: 'deployment_scaled',
+      status: 'success',
+      message: `Deployment ${deploymentName} scaled to ${replicas} replicas`,
+      deploymentName,
+      replicas,
+      isModelPool
+    });
+    
+    res.json({ 
+      success: true, 
+      message: `Deployment ${deploymentName} scaled to ${replicas} replicas`,
+      deploymentName,
+      replicas
+    });
+    
+  } catch (error) {
+    console.error('Deployment scale error:', error);
+    
+    broadcast({
+      type: 'deployment_scaled',
+      status: 'error',
+      message: `Failed to scale deployment: ${error.message}`,
+      deploymentName: req.body.deploymentName
+    });
+    
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// Model Pool智能Scale处理函数
+async function handleModelPoolScale(deploymentName, targetReplicas) {
+  // 获取当前Deployment信息
+  const deploymentInfo = await executeKubectl(`get deployment ${deploymentName} -o json`);
+  const deployment = JSON.parse(deploymentInfo);
+  const currentReplicas = deployment.spec.replicas;
+  
+  console.log(`Current replicas: ${currentReplicas}, Target: ${targetReplicas}`);
+  
+  if (targetReplicas > currentReplicas) {
+    // Scale Up: 直接增加副本数，新Pod会自动带unassigned标签
+    console.log(`Scaling up from ${currentReplicas} to ${targetReplicas}`);
+    const scaleCmd = `scale deployment ${deploymentName} --replicas=${targetReplicas}`;
+    await executeKubectl(scaleCmd);
+  } else if (targetReplicas < currentReplicas) {
+    // Scale Down: 优先删除unassigned的Pod
+    console.log(`Scaling down from ${currentReplicas} to ${targetReplicas}`);
+    
+    const podsToRemove = currentReplicas - targetReplicas;
+    console.log(`Need to remove ${podsToRemove} pods`);
+    
+    // 获取所有相关Pod
+    const modelId = deployment.metadata.labels?.['model-id'];
+    if (!modelId) {
+      throw new Error('Cannot find model-id label in deployment');
+    }
+    
+    const podsResult = await executeKubectl(`get pods -l model-id=${modelId} -o json`);
+    const pods = JSON.parse(podsResult);
+    
+    // 分类Pod：unassigned和assigned
+    const unassignedPods = pods.items.filter(pod => 
+      pod.metadata.labels?.business === 'unassigned'
+    );
+    const assignedPods = pods.items.filter(pod => 
+      pod.metadata.labels?.business !== 'unassigned'
+    );
+    
+    console.log(`Found ${unassignedPods.length} unassigned pods, ${assignedPods.length} assigned pods`);
+    
+    if (unassignedPods.length >= podsToRemove) {
+      // 有足够的unassigned Pod可以删除
+      for (let i = 0; i < podsToRemove; i++) {
+        const podName = unassignedPods[i].metadata.name;
+        console.log(`Deleting unassigned pod: ${podName}`);
+        await executeKubectl(`delete pod ${podName}`);
+      }
+      
+      // 更新Deployment副本数
+      const scaleCmd = `scale deployment ${deploymentName} --replicas=${targetReplicas}`;
+      await executeKubectl(scaleCmd);
+    } else {
+      // unassigned Pod不够，需要删除assigned Pod
+      const assignedToRemove = podsToRemove - unassignedPods.length;
+      
+      // 删除所有unassigned Pod
+      for (const pod of unassignedPods) {
+        const podName = pod.metadata.name;
+        console.log(`Deleting unassigned pod: ${podName}`);
+        await executeKubectl(`delete pod ${podName}`);
+      }
+      
+      // 警告用户需要删除assigned Pod
+      console.log(`Warning: Need to remove ${assignedToRemove} assigned pods`);
+      
+      // 删除assigned Pod (按创建时间排序，删除最新的)
+      const sortedAssignedPods = assignedPods.sort((a, b) => 
+        new Date(b.metadata.creationTimestamp) - new Date(a.metadata.creationTimestamp)
+      );
+      
+      for (let i = 0; i < assignedToRemove; i++) {
+        const podName = sortedAssignedPods[i].metadata.name;
+        const business = sortedAssignedPods[i].metadata.labels?.business;
+        console.log(`Deleting assigned pod: ${podName} (business: ${business})`);
+        await executeKubectl(`delete pod ${podName}`);
+      }
+      
+      // 更新Deployment副本数
+      const scaleCmd = `scale deployment ${deploymentName} --replicas=${targetReplicas}`;
+      await executeKubectl(scaleCmd);
+    }
+  }
+  // targetReplicas === currentReplicas 时不需要操作
+}
+
 // 业务Service列表API
 app.get('/api/business-services', async (req, res) => {
   try {
