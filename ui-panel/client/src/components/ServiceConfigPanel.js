@@ -36,8 +36,9 @@ const ServiceConfigPanel = ({ onDeploy, deploymentStatus }) => {
       
       // 过滤出模型池类型的部署
       const pools = data.filter(deployment => 
-        deployment.deploymentName.includes('-pool') || 
-        deployment.deploymentType === 'Model Pool'
+        deployment.deploymentType === 'model-pool' ||
+        deployment.deploymentName.includes('-pool') ||
+        (deployment.labels && deployment.labels['deployment-type'] === 'model-pool')
       );
       
       setModelPools(pools);

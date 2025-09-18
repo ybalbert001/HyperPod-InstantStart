@@ -5,6 +5,8 @@ metadata:
   name: SERVENGINE-MODEL_TAG-pool
   labels:
     model: "MODEL_TAG"
+    model-type: "model-pool"
+    deployment-type: "model-pool"
 spec:
   replicas: REPLICAS_COUNT
   selector:

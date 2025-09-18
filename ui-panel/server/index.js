@@ -2940,7 +2940,8 @@ app.get('/api/deployments', async (req, res) => {
         serviceType: matchingService?.spec.type || 'N/A',
         isExternal: isExternal,
         externalIP: matchingService?.status?.loadBalancer?.ingress?.[0]?.hostname || 
-                   matchingService?.status?.loadBalancer?.ingress?.[0]?.ip || 'Pending'
+                   matchingService?.status?.loadBalancer?.ingress?.[0]?.ip || 'Pending',
+        labels: labels  // 添加标签信息供前端使用
       };
     });
     
