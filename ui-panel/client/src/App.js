@@ -35,6 +35,7 @@ function App() {
   const [clusterData, setClusterData] = useState([]);
   const [pods, setPods] = useState([]);
   const [services, setServices] = useState([]);
+  const [businessServices, setBusinessServices] = useState([]);
   const [deploymentStatus, setDeploymentStatus] = useState(null);
   const [ws, setWs] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState('connecting');
@@ -106,6 +107,16 @@ function App() {
               message.success(data.message);
               // 🚀 触发操作刷新，更新业务Service列表
               operationRefreshManager.triggerOperationRefresh('service-deploy', data);
+            } else {
+              message.error(data.message);
+            }
+            break;
+            
+          case 'service_deleted':
+            if (data.status === 'success') {
+              message.success(data.message);
+              // 🚀 触发操作刷新，更新业务Service列表
+              operationRefreshManager.triggerOperationRefresh('service-delete', data);
             } else {
               message.error(data.message);
             }
@@ -373,6 +384,9 @@ function App() {
     // 初始加载pods和services（作为备用）
     fetchPodsAndServices();
     
+    // 初始加载业务Service列表
+    fetchBusinessServices();
+    
     return () => {
       clearTimeout(connectTimer);
       globalRefreshManager.unsubscribe('app-status');
@@ -400,6 +414,18 @@ function App() {
 
   // 配置：是否使用 V2 API（可以通过环境变量或配置文件控制）
   const USE_V2_API = true; // 默认使用 V2 API
+
+  // 获取业务Service列表
+  const fetchBusinessServices = async () => {
+    try {
+      const response = await fetch('/api/business-services');
+      const data = await response.json();
+      setBusinessServices(data);
+    } catch (error) {
+      console.error('Error fetching business services:', error);
+      setBusinessServices([]);
+    }
+  };
 
   const fetchPodsAndServices = useCallback(async () => {
     try {
@@ -444,6 +470,10 @@ function App() {
         setPods(podsData);
         setServices(servicesData);
       }
+      
+      // 同时获取业务Service列表
+      await fetchBusinessServices();
+      
     } catch (error) {
       console.error('Error fetching pods and services:', error);
       message.error('Failed to fetch pods and services');
@@ -828,6 +858,7 @@ function App() {
                     <StatusMonitor 
                       pods={pods}
                       services={[]}
+                      businessServices={businessServices}
                       onRefresh={fetchPodsAndServices}
                       activeTab="pods"
                     />
@@ -850,6 +881,7 @@ function App() {
                     <StatusMonitor 
                       pods={pods}
                       services={services}
+                      businessServices={businessServices}
                       onRefresh={fetchPodsAndServices}
                       activeTab="services"
                     />

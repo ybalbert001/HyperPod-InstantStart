@@ -63,6 +63,13 @@ export const REFRESH_CONFIG = {
         { components: ['all'], delay: 8000 }
       ]
     },
+    'service-delete': {
+      immediate: ['status-monitor', 'app-status', 'pods-services'],
+      delayed: [
+        { components: ['cluster-status'], delay: 3000 },
+        { components: ['all'], delay: 5000 }
+      ]
+    },
     'model-undeploy': {
       immediate: ['deployment-manager', 'status-monitor', 'app-status', 'pods-services'],
       delayed: [

@@ -31,12 +31,20 @@ const { TabPane } = Tabs;
 const { Text } = Typography;
 const { Option } = Select;
 
-const StatusMonitor = ({ pods, services, onRefresh, activeTab }) => {
+const StatusMonitor = ({ pods, services, businessServices: propBusinessServices, onRefresh, activeTab }) => {
   const [loading, setLoading] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [rayJobs, setRayJobs] = useState([]);
-  const [businessServices, setBusinessServices] = useState([]);
+  const [businessServices, setBusinessServices] = useState(propBusinessServices || []);
   const [assigningPods, setAssigningPods] = useState(new Set());
+  const [deletingServices, setDeletingServices] = useState(new Set());
+
+  // 同步businessServices props
+  useEffect(() => {
+    if (propBusinessServices) {
+      setBusinessServices(propBusinessServices);
+    }
+  }, [propBusinessServices]);
 
   // 获取RayJobs
   const fetchRayJobs = async () => {
@@ -59,6 +67,41 @@ const StatusMonitor = ({ pods, services, onRefresh, activeTab }) => {
     } catch (error) {
       console.error('Error fetching business services:', error);
       setBusinessServices([]);
+    }
+  };
+
+  // 处理Service删除
+  const handleServiceDelete = async (serviceName) => {
+    setDeletingServices(prev => new Set([...prev, serviceName]));
+    
+    try {
+      const response = await fetch(`/api/delete-service/${serviceName}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        message.success(`Service ${serviceName} deleted successfully`);
+        // 触发刷新
+        if (onRefresh) {
+          await onRefresh();
+        }
+      } else {
+        message.error(`Failed to delete service: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Error deleting service:', error);
+      message.error('Failed to delete service');
+    } finally {
+      setDeletingServices(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(serviceName);
+        return newSet;
+      });
     }
   };
 
@@ -153,7 +196,6 @@ const StatusMonitor = ({ pods, services, onRefresh, activeTab }) => {
         try {
           await onRefresh();
           await fetchRayJobs(); // 同时获取RayJobs
-          await fetchBusinessServices(); // 获取业务Service列表
           setLastUpdate(new Date());
         } catch (error) {
           console.error('Refresh error in StatusMonitor:', error);
@@ -169,9 +211,8 @@ const StatusMonitor = ({ pods, services, onRefresh, activeTab }) => {
     // 🚀 注册到操作刷新管理器
     operationRefreshManager.subscribe(componentId, refreshFunction);
 
-    // 初始获取RayJobs和业务Service
+    // 初始获取RayJobs
     fetchRayJobs();
-    fetchBusinessServices();
 
     return () => {
       globalRefreshManager.unsubscribe(componentId);
@@ -554,6 +595,42 @@ const StatusMonitor = ({ pods, services, onRefresh, activeTab }) => {
           </Space>
         );
       },
+    },
+    {
+      title: 'Actions',
+      key: 'actions',
+      width: 80,
+      render: (_, service) => {
+        // 系统Service不显示删除按钮
+        const isSystemService = service.metadata.name === 'kubernetes' || 
+                               service.metadata.namespace === 'kube-system' ||
+                               service.metadata.labels?.['kubernetes.io/managed-by'];
+        
+        if (isSystemService) {
+          return <Text type="secondary">System Service</Text>;
+        }
+        
+        return (
+          <Popconfirm
+            title="Delete Service"
+            description={`Are you sure you want to delete service ${service.metadata.name}?`}
+            onConfirm={() => handleServiceDelete(service.metadata.name)}
+            okText="Yes"
+            cancelText="No"
+            placement="left"
+          >
+            <Button
+              type="primary"
+              danger
+              size="small"
+              icon={<DeleteOutlined />}
+              loading={deletingServices.has(service.metadata.name)}
+            >
+              Delete
+            </Button>
+          </Popconfirm>
+        );
+      }
     },
   ];
 

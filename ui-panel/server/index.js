@@ -2963,6 +2963,91 @@ app.post('/api/assign-pod', async (req, res) => {
   }
 });
 
+// Service删除API
+app.delete('/api/delete-service/:serviceName', async (req, res) => {
+  try {
+    const { serviceName } = req.params;
+    
+    console.log(`Deleting service: ${serviceName}`);
+    
+    // 1. 获取Service信息，确定对应的business标签
+    let businessTag = null;
+    try {
+      const serviceInfoCmd = `get service ${serviceName} -o json`;
+      const serviceInfo = await executeKubectl(serviceInfoCmd);
+      const service = JSON.parse(serviceInfo);
+      businessTag = service.metadata?.labels?.business;
+      console.log(`Service ${serviceName} has business tag: ${businessTag}`);
+    } catch (error) {
+      console.log(`Could not get service info for ${serviceName}, proceeding with deletion`);
+    }
+    
+    // 2. 删除Service
+    const deleteCmd = `delete service ${serviceName}`;
+    await executeKubectl(deleteCmd);
+    
+    // 3. 如果有business标签，将所有相关Pod重置为unassigned
+    if (businessTag && businessTag !== 'unassigned') {
+      try {
+        console.log(`Resetting pods with business=${businessTag} to unassigned`);
+        
+        // 获取所有带有该business标签的Pod
+        const getPodsCmd = `get pods -l business=${businessTag} -o json`;
+        const podsResult = await executeKubectl(getPodsCmd);
+        const pods = JSON.parse(podsResult);
+        
+        // 重置每个Pod的business标签
+        for (const pod of pods.items) {
+          const podName = pod.metadata.name;
+          console.log(`Resetting pod ${podName} to unassigned`);
+          const labelCmd = `label pod ${podName} business=unassigned --overwrite`;
+          await executeKubectl(labelCmd);
+        }
+        
+        console.log(`Reset ${pods.items.length} pods to unassigned`);
+      } catch (error) {
+        console.error(`Error resetting pods for business ${businessTag}:`, error);
+        // 不阻止Service删除，只记录错误
+      }
+    }
+    
+    console.log(`Service ${serviceName} deleted successfully`);
+    
+    // 广播Service删除更新
+    broadcast({
+      type: 'service_deleted',
+      status: 'success',
+      message: `Service ${serviceName} deleted successfully`,
+      serviceName,
+      businessTag,
+      resetPods: businessTag ? true : false
+    });
+    
+    res.json({ 
+      success: true, 
+      message: `Service ${serviceName} deleted successfully`,
+      serviceName,
+      resetPods: businessTag ? true : false
+    });
+    
+  } catch (error) {
+    console.error('Service deletion error:', error);
+    
+    // 广播删除失败
+    broadcast({
+      type: 'service_deleted',
+      status: 'error',
+      message: `Failed to delete service: ${error.message}`,
+      serviceName: req.params.serviceName
+    });
+    
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
 // 业务Service列表API
 app.get('/api/business-services', async (req, res) => {
   try {
