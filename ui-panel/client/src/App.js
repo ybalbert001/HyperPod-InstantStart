@@ -101,6 +101,16 @@ function App() {
             }
             break;
             
+          case 'service_deployment':
+            if (data.status === 'success') {
+              message.success(data.message);
+              // 🚀 触发操作刷新，更新业务Service列表
+              operationRefreshManager.triggerOperationRefresh('service-deploy', data);
+            } else {
+              message.error(data.message);
+            }
+            break;
+            
           case 'training_launch':
             // 处理训练任务部署状态
             if (data.status === 'success') {
@@ -195,6 +205,17 @@ function App() {
               message.success(data.message);
               // 🚀 触发操作刷新 - 使用rayjob-delete操作
               operationRefreshManager.triggerOperationRefresh('rayjob-delete', data);
+            } else {
+              message.error(data.message);
+            }
+            break;
+            
+          case 'pod_assigned':
+            // 处理Pod分配状态
+            if (data.status === 'success') {
+              message.success(data.message);
+              // 🚀 触发操作刷新 - 使用pod-assign操作
+              operationRefreshManager.triggerOperationRefresh('pod-assign', data);
             } else {
               message.error(data.message);
             }
@@ -827,7 +848,7 @@ function App() {
                 >
                   <div style={{ padding: '16px' }}>
                     <StatusMonitor 
-                      pods={[]}
+                      pods={pods}
                       services={services}
                       onRefresh={fetchPodsAndServices}
                       activeTab="services"

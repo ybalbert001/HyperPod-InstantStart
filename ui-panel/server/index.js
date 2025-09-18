@@ -835,12 +835,16 @@ app.post('/api/deploy-service', async (req, res) => {
       isExternal 
     });
 
-    // 从模型池名称提取模型名称
-    let modelName = modelPool;
-    if (modelPool.includes('-pool')) {
-      // 移除-pool后缀获取模型名称
-      modelName = modelPool.replace('-pool', '');
+    // 从deployment名称中提取MODEL_TAG部分
+    // deployment名称格式: vllm-{MODEL_TAG} 或 sglang-{MODEL_TAG}
+    let modelId = modelPool;
+    if (modelPool.startsWith('vllm-')) {
+      modelId = modelPool.replace('vllm-', '');
+    } else if (modelPool.startsWith('sglang-')) {
+      modelId = modelPool.replace('sglang-', '');
     }
+    
+    console.log(`Extracted model ID: ${modelId} from deployment: ${modelPool}`);
 
     // 生成NLB注解
     const nlbAnnotations = generateNLBAnnotations(isExternal);
@@ -854,7 +858,7 @@ app.post('/api/deploy-service', async (req, res) => {
     const newYamlContent = templateContent
       .replace(/SERVICE_NAME/g, serviceName)
       .replace(/BUSINESS_TAG/g, businessTag)
-      .replace(/MODEL_NAME/g, modelName)
+      .replace(/MODEL_ID/g, modelId)
       .replace(/NLB_ANNOTATIONS/g, nlbAnnotations);
     
     // 保存到deployments目录
@@ -885,7 +889,7 @@ app.post('/api/deploy-service', async (req, res) => {
       message: `Business service ${serviceName} deployed successfully`,
       serviceName,
       businessTag,
-      modelName,
+      modelId,
       accessType
     });
     
@@ -2893,7 +2897,103 @@ app.get('/api/deployment-details', async (req, res) => {
   }
 });
 
-// 获取已部署的模型列表
+// Pod分配管理API
+app.post('/api/assign-pod', async (req, res) => {
+  try {
+    const { podName, businessTag, modelId } = req.body;
+    
+    console.log('Pod assignment request:', { podName, businessTag, modelId });
+    
+    // 验证参数
+    if (!podName || !businessTag || !modelId) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Missing required parameters: podName, businessTag, modelId' 
+      });
+    }
+    
+    // 验证Pod存在且属于指定模型
+    const podCheckCmd = `get pod ${podName} -o json`;
+    const podResult = await executeKubectl(podCheckCmd);
+    const pod = JSON.parse(podResult);
+    
+    if (!pod.metadata.labels?.['model-id'] || pod.metadata.labels['model-id'] !== modelId) {
+      return res.status(400).json({ 
+        success: false, 
+        error: `Pod model-id '${pod.metadata.labels?.['model-id']}' does not match expected '${modelId}'` 
+      });
+    }
+    
+    // 执行Pod标签修改
+    const labelCmd = `label pod ${podName} business=${businessTag} --overwrite`;
+    await executeKubectl(labelCmd);
+    
+    console.log(`Pod ${podName} assigned to business: ${businessTag}`);
+    
+    // 广播Pod分配更新
+    broadcast({
+      type: 'pod_assigned',
+      status: 'success',
+      message: `Pod ${podName} assigned to ${businessTag}`,
+      podName,
+      businessTag,
+      modelId
+    });
+    
+    res.json({ 
+      success: true, 
+      message: `Pod ${podName} successfully assigned to ${businessTag}`,
+      podName,
+      businessTag
+    });
+    
+  } catch (error) {
+    console.error('Pod assignment error:', error);
+    
+    broadcast({
+      type: 'pod_assigned',
+      status: 'error',
+      message: `Failed to assign pod: ${error.message}`
+    });
+    
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// 业务Service列表API
+app.get('/api/business-services', async (req, res) => {
+  try {
+    console.log('Fetching business services...');
+    
+    // 获取所有Service
+    const servicesOutput = await executeKubectl('get services -o json');
+    const services = JSON.parse(servicesOutput);
+    
+    // 过滤业务Service
+    const businessServices = services.items
+      .filter(service => service.metadata.labels?.['service-type'] === 'business-service')
+      .map(service => ({
+        name: service.metadata.name,
+        businessTag: service.metadata.labels.business,
+        displayName: service.metadata.labels.business || service.metadata.name,
+        modelId: service.metadata.labels['model-id']
+      }));
+    
+    console.log('Business services found:', businessServices.length);
+    res.json(businessServices);
+    
+  } catch (error) {
+    console.error('Business services fetch error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
 app.get('/api/deployments', async (req, res) => {
   try {
     console.log('Fetching deployments...');

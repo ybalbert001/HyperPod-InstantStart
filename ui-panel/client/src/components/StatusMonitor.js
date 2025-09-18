@@ -8,7 +8,9 @@ import {
   Button,
   Typography,
   message,
-  Popconfirm
+  Popconfirm,
+  Select,
+  Tooltip
 } from 'antd';
 import { 
   CheckCircleOutlined, 
@@ -18,7 +20,8 @@ import {
   ReloadOutlined,
   ApiOutlined,
   ContainerOutlined,
-  DeleteOutlined
+  DeleteOutlined,
+  InfoCircleOutlined
 } from '@ant-design/icons';
 import globalRefreshManager from '../hooks/useGlobalRefresh';
 import operationRefreshManager from '../hooks/useOperationRefresh';
@@ -26,11 +29,14 @@ import { CONFIG } from '../config/constants';
 
 const { TabPane } = Tabs;
 const { Text } = Typography;
+const { Option } = Select;
 
 const StatusMonitor = ({ pods, services, onRefresh, activeTab }) => {
   const [loading, setLoading] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [rayJobs, setRayJobs] = useState([]);
+  const [businessServices, setBusinessServices] = useState([]);
+  const [assigningPods, setAssigningPods] = useState(new Set());
 
   // 获取RayJobs
   const fetchRayJobs = async () => {
@@ -41,6 +47,77 @@ const StatusMonitor = ({ pods, services, onRefresh, activeTab }) => {
     } catch (error) {
       console.error('Error fetching RayJobs:', error);
       setRayJobs([]);
+    }
+  };
+
+  // 获取业务Service列表
+  const fetchBusinessServices = async () => {
+    try {
+      const response = await fetch('/api/business-services');
+      const data = await response.json();
+      setBusinessServices(data);
+    } catch (error) {
+      console.error('Error fetching business services:', error);
+      setBusinessServices([]);
+    }
+  };
+
+  // 检查是否为模型池Pod
+  const isPoolPod = (pod) => {
+    const labels = pod.metadata?.labels || {};
+    return labels['model-id'] && 
+           labels.business !== undefined &&
+           labels['deployment-type'] === 'model-pool';
+  };
+
+  // 处理Pod分配
+  const handlePodAssign = async (podName, businessTag) => {
+    const pod = pods.find(p => p.metadata.name === podName);
+    if (!pod) return;
+
+    const modelId = pod.metadata.labels?.['model-id'];
+    if (!modelId) {
+      message.error('Pod model-id information not found');
+      return;
+    }
+
+    setAssigningPods(prev => new Set([...prev, podName]));
+
+    try {
+      const response = await fetch('/api/assign-pod', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          podName,
+          businessTag,
+          modelId
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        message.success(`Pod ${podName} assigned to ${businessTag}`);
+        // 触发操作刷新
+        operationRefreshManager.triggerOperationRefresh('pod-assign', {
+          podName,
+          businessTag,
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        message.error(result.error || 'Assignment failed');
+      }
+    } catch (error) {
+      console.error('Pod assignment error:', error);
+      message.error('Failed to assign pod');
+    } finally {
+      setAssigningPods(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(podName);
+        return newSet;
+      });
     }
   };
 
@@ -76,6 +153,7 @@ const StatusMonitor = ({ pods, services, onRefresh, activeTab }) => {
         try {
           await onRefresh();
           await fetchRayJobs(); // 同时获取RayJobs
+          await fetchBusinessServices(); // 获取业务Service列表
           setLastUpdate(new Date());
         } catch (error) {
           console.error('Refresh error in StatusMonitor:', error);
@@ -91,8 +169,9 @@ const StatusMonitor = ({ pods, services, onRefresh, activeTab }) => {
     // 🚀 注册到操作刷新管理器
     operationRefreshManager.subscribe(componentId, refreshFunction);
 
-    // 初始获取RayJobs
+    // 初始获取RayJobs和业务Service
     fetchRayJobs();
+    fetchBusinessServices();
 
     return () => {
       globalRefreshManager.unsubscribe(componentId);
@@ -217,6 +296,39 @@ const StatusMonitor = ({ pods, services, onRefresh, activeTab }) => {
           >
             {status.toUpperCase()}
           </Tag>
+        );
+      },
+    },
+    {
+      title: 'Business',
+      key: 'business',
+      render: (_, pod) => {
+        if (!isPoolPod(pod)) {
+          return <Text type="secondary">N/A</Text>;
+        }
+
+        const currentBusiness = pod.metadata.labels?.business || 'unassigned';
+        const podName = pod.metadata.name;
+        const isAssigning = assigningPods.has(podName);
+
+        return (
+          <Select
+            value={currentBusiness}
+            onChange={(value) => handlePodAssign(podName, value)}
+            style={{ width: 140 }}
+            size="small"
+            loading={isAssigning}
+            disabled={isAssigning}
+          >
+            <Option value="unassigned">
+              <Text type="secondary">Unassigned</Text>
+            </Option>
+            {businessServices.map(service => (
+              <Option key={service.businessTag} value={service.businessTag}>
+                <Text>{service.displayName}</Text>
+              </Option>
+            ))}
+          </Select>
         );
       },
     },
@@ -348,6 +460,22 @@ const StatusMonitor = ({ pods, services, onRefresh, activeTab }) => {
     }
   ];
 
+  // 计算Service关联的Pod数量
+  const getServicePodCount = (service) => {
+    const selector = service.spec?.selector || {};
+    if (Object.keys(selector).length === 0) {
+      return 0;
+    }
+
+    return pods.filter(pod => {
+      const podLabels = pod.metadata?.labels || {};
+      // 检查Pod的标签是否匹配Service的selector
+      return Object.entries(selector).every(([key, value]) => 
+        podLabels[key] === value
+      );
+    }).length;
+  };
+
   // Service表格列定义
   const serviceColumns = [
     {
@@ -371,6 +499,22 @@ const StatusMonitor = ({ pods, services, onRefresh, activeTab }) => {
           {type}
         </Tag>
       ),
+    },
+    {
+      title: 'Pods',
+      key: 'pods',
+      render: (_, service) => {
+        const podCount = getServicePodCount(service);
+        return (
+          <Badge 
+            count={podCount}
+            style={{ 
+              backgroundColor: podCount > 0 ? '#52c41a' : '#d9d9d9',
+              color: podCount > 0 ? 'white' : '#666'
+            }}
+          />
+        );
+      },
     },
     {
       title: 'Cluster IP',

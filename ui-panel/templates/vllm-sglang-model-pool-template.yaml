@@ -2,21 +2,23 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: SERVENGINE-MODEL_TAG-pool
+  name: SERVENGINE-MODEL_TAG
   labels:
-    model: "MODEL_TAG"
-    model-type: "model-pool"
+    model-id: "MODEL_TAG"
+    engine: "SERVENGINE"
     deployment-type: "model-pool"
 spec:
   replicas: REPLICAS_COUNT
   selector:
     matchLabels:
-      model: "MODEL_TAG"
+      model-id: "MODEL_TAG"
   template:
     metadata:
       labels:
-        model: "MODEL_TAG"
-        business: unassigned
+        model-id: "MODEL_TAG"
+        engine: "SERVENGINE"
+        business: "unassigned"
+        deployment-type: "model-pool"
     spec:
       nodeSelector:
         beta.kubernetes.io/instance-type: INSTANCE_TYPE

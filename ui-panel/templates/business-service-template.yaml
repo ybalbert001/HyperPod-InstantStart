@@ -5,12 +5,12 @@ metadata:
   name: SERVICE_NAME-nlb
   labels:
     business: "BUSINESS_TAG"
-    model: "MODEL_NAME"
+    model-id: "MODEL_ID"
     service-type: "business-service"
   annotations:NLB_ANNOTATIONS
 spec:
   selector:
-    model: "MODEL_NAME"
+    model-id: "MODEL_ID"
     business: "BUSINESS_TAG"
   type: LoadBalancer
   ports:

@@ -56,6 +56,13 @@ export const REFRESH_CONFIG = {
         { components: ['all'], delay: 10000 }
       ]
     },
+    'service-deploy': {
+      immediate: ['status-monitor', 'app-status', 'pods-services'],
+      delayed: [
+        { components: ['cluster-status'], delay: 3000 },
+        { components: ['all'], delay: 8000 }
+      ]
+    },
     'model-undeploy': {
       immediate: ['deployment-manager', 'status-monitor', 'app-status', 'pods-services'],
       delayed: [
@@ -89,6 +96,13 @@ export const REFRESH_CONFIG = {
       delayed: [
         { components: ['cluster-status'], delay: 5000 },
         { components: ['all'], delay: 10000 }
+      ]
+    },
+    'pod-assign': {
+      immediate: ['status-monitor', 'app-status', 'pods-services'],
+      delayed: [
+        { components: ['deployment-manager'], delay: 2000 }, // 更新部署统计
+        { components: ['all'], delay: 5000 }
       ]
     },
     'training-delete': {

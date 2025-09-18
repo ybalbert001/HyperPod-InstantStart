@@ -597,6 +597,175 @@ kubectl label pod qwen-06b-pool-xxx business=production --overwrite
 - 全局刷新系统自动更新UI
 - 操作刷新确保状态一致性
 
+## 🛠️ 模板标签修改指南 (2025-09-18)
+
+### **标签分类与修改规则**
+
+#### **🔒 不能修改的标签（代码硬编码识别）**
+
+**Model Pool Template**:
+```yaml
+deployment-type: "model-pool"  # ❌ 硬编码在 StatusMonitor.js:70 和 ServiceConfigPanel.js:41
+model-type: "model-pool"       # ❌ 硬编码在 server/index.js:2791,3017
+```
+
+**Business Service Template**:
+```yaml
+service-type: "business-service"  # ❌ 硬编码在 server/index.js:2969
+```
+
+#### **🔄 动态分配的标签（运行时会改变）**
+
+**Model Pool Pod 标签**:
+```yaml
+business: "unassigned"  # ✅ 初始值，运行时会动态改为 "biz-a", "biz-b" 等
+```
+
+**说明**: `business`标签是整个系统的核心，Pod分配功能就是通过修改这个标签值来实现动态调度的。
+
+#### **🔄 必须配对修改的标签键名**
+
+**关键匹配对**：
+```yaml
+# Model Pool Pod 标签 ↔ Service Selector
+model: "MODEL_TAG"     # 键名必须一致，值会自动匹配
+business: "BUSINESS_TAG"  # 键名必须一致，值会动态分配
+```
+
+**修改规则**：
+- 如果要修改`model`标签的**键名**（如改为`model-name`），必须同时修改Service selector
+- 如果要修改`business`标签的**键名**（如改为`business-unit`），必须同时修改Service selector
+- 标签的**值**会由系统自动处理，不需要手动修改
+
+#### **✅ 可以自由修改的标签**
+
+**Model Pool Template**:
+```yaml
+# Deployment metadata labels (不影响功能)
+model: "MODEL_TAG"  # 可改键名，但需配对修改Service
+# 可添加自定义标签
+team: "ai-team"
+version: "v1.0"
+environment: "production"
+owner: "data-science-team"
+```
+
+**Business Service Template**:
+```yaml
+# Service metadata labels (仅用于标识，不影响Pod匹配)
+business: "BUSINESS_TAG"  # 仅用于标识
+model: "MODEL_NAME"       # 仅用于标识
+# 可添加自定义标签
+team: "ai-team"
+cost-center: "ml-ops"
+```
+
+### **动态标签分配流程**
+
+**Pod生命周期中的标签变化**：
+```yaml
+# 1. 初始部署时
+labels:
+  model: "vllm-qwen-2025-09-18-00-29-55"
+  business: "unassigned"  # 初始状态
+  deployment-type: "model-pool"
+
+# 2. 分配给业务A后
+labels:
+  model: "vllm-qwen-2025-09-18-00-29-55"  # 不变
+  business: "biz-a"  # 动态改变
+  deployment-type: "model-pool"  # 不变
+
+# 3. 重新分配给业务B
+labels:
+  model: "vllm-qwen-2025-09-18-00-29-55"  # 不变
+  business: "biz-b"  # 再次改变
+  deployment-type: "model-pool"  # 不变
+```
+
+**Service匹配逻辑**：
+```yaml
+# Service A 只匹配分配给它的Pod
+selector:
+  model: "vllm-qwen-2025-09-18-00-29-55"
+  business: "biz-a"  # 只匹配 business="biz-a" 的Pod
+
+# Service B 只匹配分配给它的Pod  
+selector:
+  model: "vllm-qwen-2025-09-18-00-29-55"
+  business: "biz-b"  # 只匹配 business="biz-b" 的Pod
+```
+
+### **修改注意事项**
+
+1. **代码同步**：修改标签键名时，需要同步修改：
+   - `StatusMonitor.js` - Pod识别逻辑
+   - `ServiceConfigPanel.js` - 模型池过滤逻辑
+   - `server/index.js` - 业务Service过滤逻辑
+
+2. **测试验证**：修改后需要验证：
+   - Pod分配功能正常
+   - Service能正确显示Pod数量
+   - 模型池识别正确
+
+3. **向后兼容**：修改标签可能影响现有部署，建议逐步迁移
+
+### **安全修改示例**
+
+**场景**: 将`business`标签键名改为`business-unit`
+
+**步骤1**: 修改模型池模板
+```yaml
+# vllm-sglang-model-pool-template.yaml
+template:
+  metadata:
+    labels:
+      model: "MODEL_TAG"
+      business-unit: "unassigned"  # 改键名
+      deployment-type: "model-pool"
+```
+
+**步骤2**: 修改Service模板
+```yaml
+# business-service-template.yaml
+spec:
+  selector:
+    model: "MODEL_NAME"
+    business-unit: "BUSINESS_TAG"  # 改键名
+```
+
+**步骤3**: 修改代码中的硬编码引用
+```javascript
+// StatusMonitor.js
+const isPoolPod = (pod) => {
+  const labels = pod.metadata?.labels || {};
+  return labels.model && 
+         labels['business-unit'] !== undefined &&  // 改键名
+         labels['deployment-type'] === 'model-pool';
+};
+
+// Pod分配时的标签键名
+const currentBusiness = pod.metadata.labels?.['business-unit'] || 'unassigned';
+```
+
+**步骤4**: 更新Pod分配API
+```javascript
+// server/index.js - /api/assign-pod
+const labelCommand = `kubectl label pod ${podName} business-unit=${businessTag} --overwrite`;
+```
+
+### **标签匹配逻辑验证**
+
+**正确的匹配流程**：
+```
+1. 模型池部署 → Pod标签: {model: "deployment-name", business: "unassigned"}
+2. Service部署 → Selector: {model: "deployment-name", business: "business-tag"}
+3. Pod分配 → Pod标签: {model: "deployment-name", business: "business-tag"}
+4. Service匹配 → 显示Pod数量: 1
+```
+
+---
+
 ## 🚨 开发过程中的注意事项
 
 ### **1. 向后兼容性** ✅ 已确保
@@ -609,7 +778,78 @@ kubectl label pod qwen-06b-pool-xxx business=production --overwrite
 **解决**: 删除重复声明，确保函数只定义一次
 **教训**: 大文件修改时需要仔细检查是否有重复代码
 
-### **4. UI结构调整** ✅ 已解决
+### **5. 标签匹配问题修复** ✅ 已解决 (2025-09-18)
+**问题**: Service无法正确显示其关联的Pod数量
+**原因**: 
+1. 模型池模板中Pod的`business`标签值不一致（`unassigned` vs `"unassigned"`）
+2. Service部署时模型名称提取逻辑错误
+3. 模板中deployment命名不一致
+
+**解决方案**:
+1. **模板修复**:
+   ```yaml
+   # 修复前
+   business: unassigned          # 无引号
+   name: SERVENGINE-MODEL_TAG-pool  # 包含-pool后缀
+   
+   # 修复后  
+   business: "unassigned"        # 有引号，确保字符串类型
+   name: SERVENGINE-MODEL_TAG    # 移除-pool后缀
+   ```
+
+2. **代码修复**:
+   ```javascript
+   // 修复前：错误地移除-pool后缀
+   let modelName = modelPool.replace('-pool', '');
+   
+   // 修复后：直接使用modelPool作为modelName
+   const modelName = modelPool;
+   ```
+
+**验证方法**:
+```bash
+# 检查Pod标签
+kubectl get pods -o jsonpath='{.items[*].metadata.labels}'
+
+# 检查Service selector
+kubectl get service -o jsonpath='{.items[*].spec.selector}'
+
+# 验证匹配
+kubectl get pods -l model="deployment-name",business="business-tag"
+```
+
+### **6. Pod分配功能实现** ✅ 已完成 (2025-09-18)
+**功能**: 在StatusMonitor的Pods标签页中为模型池Pod添加业务分配下拉选择器
+
+**实现要点**:
+1. **Pod识别逻辑**:
+   ```javascript
+   const isPoolPod = (pod) => {
+     const labels = pod.metadata?.labels || {};
+     return labels.model && 
+            labels.business !== undefined &&
+            labels['deployment-type'] === 'model-pool';
+   };
+   ```
+
+2. **动态业务Service获取**:
+   ```javascript
+   // 通过API动态获取，无硬编码
+   const businessServices = await fetch('/api/business-services');
+   ```
+
+3. **Pod分配API**:
+   ```javascript
+   POST /api/assign-pod
+   Body: { podName, businessTag, modelName }
+   // 使用 kubectl label pod {podName} business={businessTag} --overwrite
+   ```
+
+**UI特性**:
+- 只对模型池Pod显示分配下拉选择器
+- 普通Pod显示"N/A"
+- 支持"unassigned"选项
+- 分配过程中显示loading状态
 **问题**: 初始设计将配置功能放在页面级别的子标签页，导致右侧TestPanel重新渲染
 **解决**: 改为左侧配置区域内部的标签页切换，右侧TestPanel保持稳定
 **优势**: 
@@ -714,38 +954,43 @@ GET /api/pool-status/:deploymentName
    - 左侧配置区域内部标签页切换 ✅
    - 模型池识别和选择功能 ✅
 
-### **🚧 开发中功能 (Phase 3)**
-1. **Pod动态分配**: StatusMonitor中的分配UI
-2. **Pod标签修改**: `/api/assign-pod` API端点
-3. **业务Service列表**: `/api/business-services` API端点
-4. **Pool智能扩缩容**: 区分普通和Pool Deployment的Scale逻辑
-5. **统计显示**: DeploymentManager中的Pod分配统计
+3. **Pod动态分配** (2025-09-18 新增): 
+   - StatusMonitor中的Pod分配UI ✅
+   - `/api/assign-pod` API端点 ✅
+   - `/api/business-services` API端点 ✅
+   - Pod标签修改功能 ✅
+   - Service Pod数量显示修复 ✅
 
-### **❌ 待实现功能 (Phase 3B + Phase 4)**
-1. **模型池状态监控**: `/api/pool-status/:deploymentName` API端点
-2. **刷新系统集成**: Pod分配操作的状态同步
-3. **批量Pod分配**: 按比例分配Pod功能
-4. **调度历史**: 模型池调度历史记录
-5. **性能监控**: 负载均衡和性能监控
+### **🚧 开发中功能 (Phase 3B)**
+1. **Pool智能扩缩容**: 区分普通和Pool Deployment的Scale逻辑
+2. **统计显示**: DeploymentManager中的Pod分配统计
+3. **模型池状态监控**: `/api/pool-status/:deploymentName` API端点
+
+### **❌ 待实现功能 (Phase 4)**
+1. **刷新系统集成**: Pod分配操作的状态同步
+2. **批量Pod分配**: 按比例分配Pod功能
+3. **调度历史**: 模型池调度历史记录
+4. **性能监控**: 负载均衡和性能监控
 
 ### **🔍 功能完整度**
 ```
 Phase 1: 基础模型池功能    ████████████ 100%
 Phase 2: Service配置功能   ████████████ 100%
-Phase 3: 动态调度功能      ██░░░░░░░░░░  20% (设计完成)
+Phase 3A: Pod动态分配     ████████████ 100% ✅ 新完成
+Phase 3B: 扩缩容和统计    ██░░░░░░░░░░  20%
 Phase 4: 增强功能          ░░░░░░░░░░░░   0%
 
-总体进度: ████████░░░░ 60%
+总体进度: ██████████░░ 80%
 ```
 
 ### **⚠️ 当前状态**
-- **基础设施完备**: 模型池和业务Service都能正常创建
-- **核心功能缺失**: Pod分配功能是下一步的关键实现目标
-- **设计已确定**: Phase 3的技术方案和UI设计已明确
-- **准备开发**: 可以开始实现Pod分配的核心API和UI功能
+- **核心功能完成**: Pod分配功能已实现，用户可以在UI中动态分配Pod ✅
+- **Service显示修复**: Service能正确显示其关联的Pod数量 ✅
+- **标签匹配修复**: 模板标签匹配逻辑已修复 ✅
+- **下一步目标**: 实现Pool智能扩缩容和统计显示功能
 
 ### **🎯 下一个里程碑**
-**实现Pod动态分配核心功能**，让用户能够在UI中将unassigned的Pod分配给不同的业务Service，实现真正的动态调度能力。
+**实现Pool智能扩缩容功能**，让用户能够安全地扩缩容模型池，并显示Pod分配统计信息。
 
 ---
 
