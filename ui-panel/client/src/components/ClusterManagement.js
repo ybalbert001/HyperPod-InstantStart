@@ -62,7 +62,7 @@ const DependencyStatus = ({ dependenciesConfigured }) => {
 };
 
 // 依赖配置按钮组件
-const DependencyConfigButton = ({ clusterTag }) => {
+const DependencyConfigButton = ({ clusterTag, refreshTrigger }) => {
   const [depStatus, setDepStatus] = useState(null);
   const [configuring, setConfiguring] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -122,6 +122,13 @@ const DependencyConfigButton = ({ clusterTag }) => {
       fetchDependencyStatus();
     }
   }, [clusterTag]);
+
+  // 响应外部刷新触发
+  useEffect(() => {
+    if (refreshTrigger && clusterTag) {
+      fetchDependencyStatus();
+    }
+  }, [refreshTrigger]);
 
   // 获取按钮文本和状态
   const getButtonProps = () => {
@@ -204,6 +211,7 @@ const ClusterManagement = () => {
   const [clustersLoading, setClustersLoading] = useState(false);
   const [clusterDetails, setClusterDetails] = useState(null);
   const [dependenciesConfigured, setDependenciesConfigured] = useState(false);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
   
   // 导入现有集群状态
   const [showImportModal, setShowImportModal] = useState(false);
@@ -406,6 +414,9 @@ const ClusterManagement = () => {
     if (clusterTag === activeCluster) return;
     
     setClustersLoading(true);
+    // 重置依赖状态
+    setDependenciesConfigured(false);
+    
     try {
       const response = await fetch('/api/multi-cluster/switch', {
         method: 'POST',
@@ -554,6 +565,8 @@ const ClusterManagement = () => {
     if (!activeCluster) {
       form.setFieldsValue(defaultConfig);
     }
+    // 重置依赖状态
+    setDependenciesConfigured(false);
   }, [activeCluster]); // 当 activeCluster 变化时设置默认值
 
   // 检查步骤状态的函数
@@ -890,7 +903,10 @@ const ClusterManagement = () => {
                                 <Button 
                                   size="small"
                                   icon={<ReloadOutlined />} 
-                                  onClick={fetchClusters}
+                                  onClick={() => {
+                                    fetchClusters();
+                                    setRefreshTrigger(prev => prev + 1);
+                                  }}
                                   loading={clustersLoading}
                                   type="text"
                                 >
@@ -958,7 +974,10 @@ const ClusterManagement = () => {
                           <Col>
                             <Space>
                               {activeCluster && (
-                                <DependencyConfigButton clusterTag={activeCluster} />
+                                <DependencyConfigButton 
+                                  clusterTag={activeCluster} 
+                                  refreshTrigger={refreshTrigger}
+                                />
                               )}
                               <Button 
                                 type="default"

@@ -9,12 +9,30 @@ class ClusterDependencyManager {
    */
   static async executeNonBlocking(command, options = {}) {
     return new Promise((resolve, reject) => {
-      const child = spawn('bash', ['-c', command], {
-        stdio: options.stdio || 'inherit',
+      // 添加日志头部
+      const logFile = '/app/tmp/dependency-install.log';
+      const timestamp = new Date().toISOString();
+      const logHeader = `\n=== ${timestamp} ===\nExecuting: ${command.substring(0, 100)}...\n`;
+      
+      try {
+        fs.appendFileSync(logFile, logHeader);
+      } catch (err) {
+        console.error('Failed to write log header:', err);
+      }
+      
+      const child = spawn('bash', ['-c', `${command} >> ${logFile} 2>&1`], {
+        stdio: 'pipe',
         ...options
       });
       
       child.on('close', (code) => {
+        const logFooter = `\n--- Command completed with exit code: ${code} ---\n`;
+        try {
+          fs.appendFileSync(logFile, logFooter);
+        } catch (err) {
+          console.error('Failed to write log footer:', err);
+        }
+        
         if (code === 0) {
           resolve();
         } else {
@@ -23,6 +41,12 @@ class ClusterDependencyManager {
       });
       
       child.on('error', (error) => {
+        const errorLog = `\n!!! Command execution error: ${error.message} !!!\n`;
+        try {
+          fs.appendFileSync(logFile, errorLog);
+        } catch (err) {
+          console.error('Failed to write error log:', err);
+        }
         reject(error);
       });
     });
@@ -68,8 +92,11 @@ done > stack_envs'`;
     console.log('Configuring kubectl and OIDC...');
     
     const kubectlCmd = `cd ${clusterConfigDir} && bash -c 'source init_envs && source stack_envs && 
-aws eks update-kubeconfig --name $EKS_CLUSTER_NAME --region $AWS_REGION && 
-eksctl utils associate-iam-oidc-provider --region $AWS_REGION --cluster $EKS_CLUSTER_NAME --approve'`;
+echo "=== Configuring kubectl for cluster: $EKS_CLUSTER_NAME ===" &&
+aws eks update-kubeconfig --name $EKS_CLUSTER_NAME --region $AWS_REGION &&
+echo "=== Associating IAM OIDC provider ===" &&
+eksctl utils associate-iam-oidc-provider --region $AWS_REGION --cluster $EKS_CLUSTER_NAME --approve &&
+echo "=== kubectl and OIDC configuration completed ==="'`;
     
     await this.executeNonBlocking(kubectlCmd);
   }
@@ -94,9 +121,12 @@ eksctl utils associate-iam-oidc-provider --region $AWS_REGION --cluster $EKS_CLU
     console.log('Setting up helm repositories...');
     
     const repoCmd = `cd ${clusterConfigDir} && 
-helm repo add eks https://aws.github.io/eks-charts && 
-helm repo add nvidia https://nvidia.github.io/k8s-device-plugin && 
-helm repo update`;
+echo "=== Setting up Helm repositories ===" &&
+helm repo add eks https://aws.github.io/eks-charts --debug &&
+helm repo add nvidia https://nvidia.github.io/k8s-device-plugin --debug &&
+echo "=== Updating Helm repositories ===" &&
+helm repo update --debug &&
+echo "=== Helm repositories setup completed ==="`;
     
     await this.executeNonBlocking(repoCmd);
   }
@@ -137,7 +167,11 @@ kubectl create namespace aws-hyperpod --dry-run=client -o yaml | kubectl apply -
     console.log('Installing HyperPod helm chart...');
     
     const installCmd = `cd ${clusterConfigDir} && bash -c 'source init_envs && source stack_envs && 
-helm dependency build sagemaker-hyperpod-cli/helm_chart/HyperPodHelmChart && 
+echo "=== Building HyperPod Helm Chart dependencies ===" &&
+helm dependency build sagemaker-hyperpod-cli/helm_chart/HyperPodHelmChart --debug &&
+echo "=== Installing HyperPod Helm Chart ===" &&
+echo "Cluster: $EKS_CLUSTER_NAME" &&
+echo "Region: $AWS_REGION" &&
 helm upgrade --install hyperpod-dependencies ./sagemaker-hyperpod-cli/helm_chart/HyperPodHelmChart \\
   --kube-context arn:aws:eks:$AWS_REGION:$(aws sts get-caller-identity --query Account --output text):cluster/$EKS_CLUSTER_NAME \\
   --namespace kube-system \\
@@ -149,7 +183,9 @@ helm upgrade --install hyperpod-dependencies ./sagemaker-hyperpod-cli/helm_chart
   --set mpi-operator.enabled=true \\
   --set trainingOperators.enabled=true \\
   --set deep-health-check.enabled=false \\
-  --set job-auto-restart.enabled=false'`;
+  --set job-auto-restart.enabled=false \\
+  --debug --timeout=10m &&
+echo "=== HyperPod Helm Chart installation completed ==="'`;
     
     await this.executeNonBlocking(installCmd);
   }
@@ -225,34 +261,6 @@ helm upgrade --install hyperpod-dependencies ./sagemaker-hyperpod-cli/helm_chart
             --policy-document file:///tmp/alb-iam-policy.json || echo "Policy creation failed"
     fi
 
-    # 创建IAM服务账户（先删除再创建确保干净状态）
-    echo "Ensuring clean ServiceAccount state..."
-    eksctl delete iamserviceaccount --cluster=\$EKS_CLUSTER_NAME --namespace=kube-system --name=aws-load-balancer-controller >> /app/tmp/dependency-install.log 2>&1 || echo "ServiceAccount not found, proceeding..."
-    
-    # 使用短的角色名称避免64字符限制
-    ROLE_NAME="ALB-\$EKS_CLUSTER_NAME"
-    
-    eksctl create iamserviceaccount \\
-      --cluster=\$EKS_CLUSTER_NAME \\
-      --namespace=kube-system \\
-      --name=aws-load-balancer-controller \\
-      --role-name=\$ROLE_NAME \\
-      --attach-policy-arn=arn:aws:iam::\$ACCOUNT_ID:policy/AWSLoadBalancerControllerIAMPolicy \\
-      --region=\$AWS_REGION \\
-      --approve >> /app/tmp/dependency-install.log 2>&1 || echo "ServiceAccount creation failed or already exists"
-
-    # 获取公有子网并添加ELB标签
-    echo "Tagging public subnets for ELB..."
-    PUBLIC_SUBNETS=\$(aws ec2 describe-subnets \\
-        --filters "Name=vpc-id,Values=\${VPC_ID}" "Name=map-public-ip-on-launch,Values=true" \\
-        --query "Subnets[*].SubnetId" \\
-        --output text)
-    
-    for SUBNET_ID in \$PUBLIC_SUBNETS; do
-        echo "Tagging public subnet: \$SUBNET_ID"
-        aws ec2 create-tags --resources \$SUBNET_ID --tags Key=kubernetes.io/role/elb,Value=1 >> /app/tmp/dependency-install.log 2>&1 || echo "Failed to tag \$SUBNET_ID"
-    done
-
     # 删除现有的AWS Load Balancer Controller（如果存在）
     echo "Removing existing AWS Load Balancer Controller..."
     helm uninstall aws-load-balancer-controller -n kube-system >> /app/tmp/dependency-install.log 2>&1 || echo "No existing controller found"
@@ -267,6 +275,42 @@ helm upgrade --install hyperpod-dependencies ./sagemaker-hyperpod-cli/helm_chart
         sleep 5
     done
 
+    # 创建IAM服务账户（先删除再创建确保干净状态）
+    echo "Ensuring clean ServiceAccount state..."
+    eksctl delete iamserviceaccount --cluster=\$EKS_CLUSTER_NAME --namespace=kube-system --name=aws-load-balancer-controller >> /app/tmp/dependency-install.log 2>&1 || echo "ServiceAccount not found, proceeding..."
+    
+    # 使用短的角色名称避免64字符限制
+    ROLE_NAME="ALB-\$EKS_CLUSTER_NAME"
+    
+    echo "Creating ServiceAccount for AWS Load Balancer Controller..."
+    eksctl create iamserviceaccount \\
+      --cluster=\$EKS_CLUSTER_NAME \\
+      --namespace=kube-system \\
+      --name=aws-load-balancer-controller \\
+      --role-name=\$ROLE_NAME \\
+      --attach-policy-arn=arn:aws:iam::\$ACCOUNT_ID:policy/AWSLoadBalancerControllerIAMPolicy \\
+      --region=\$AWS_REGION \\
+      --approve
+    
+    # 验证ServiceAccount创建成功
+    if ! kubectl get serviceaccount aws-load-balancer-controller -n kube-system >/dev/null 2>&1; then
+        echo "❌ Failed to create ServiceAccount"
+        exit 1
+    fi
+    echo "✅ ServiceAccount created successfully"
+
+    # 获取公有子网并添加ELB标签
+    echo "Tagging public subnets for ELB..."
+    PUBLIC_SUBNETS=\$(aws ec2 describe-subnets \\
+        --filters "Name=vpc-id,Values=\${VPC_ID}" "Name=map-public-ip-on-launch,Values=true" \\
+        --query "Subnets[*].SubnetId" \\
+        --output text)
+    
+    for SUBNET_ID in \$PUBLIC_SUBNETS; do
+        echo "Tagging public subnet: \$SUBNET_ID"
+        aws ec2 create-tags --resources \$SUBNET_ID --tags Key=kubernetes.io/role/elb,Value=1 >> /app/tmp/dependency-install.log 2>&1 || echo "Failed to tag \$SUBNET_ID"
+    done
+
     # 安装AWS Load Balancer Controller
     echo "Installing AWS Load Balancer Controller..."
     helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \\
@@ -276,14 +320,11 @@ helm upgrade --install hyperpod-dependencies ./sagemaker-hyperpod-cli/helm_chart
       --set serviceAccount.name=aws-load-balancer-controller \\
       --set vpcId=\$VPC_ID \\
       --set region=\$AWS_REGION \\
-      --wait --timeout=300s
+      --timeout=300s
 
-    # 验证Controller Pod状态
-    echo "Verifying AWS Load Balancer Controller deployment..."
-    kubectl wait --for=condition=available --timeout=300s deployment/aws-load-balancer-controller -n kube-system || {
-        echo "WARNING: Controller deployment verification failed, but continuing..."
-        kubectl get pods -n kube-system | grep aws-load-balancer || echo "No controller pods found"
-    }
+    # 验证Controller安装状态（不等待Pod就绪）
+    echo "Checking AWS Load Balancer Controller installation..."
+    helm list -n kube-system | grep aws-load-balancer-controller || echo "Controller not found in helm list"
 
     # 最终状态检查
     echo "Final status check..."
