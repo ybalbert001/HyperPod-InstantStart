@@ -272,6 +272,42 @@ function App() {
             }
             break;
             
+          case 'cluster_dependencies_started':
+            if (data.status === 'success' || data.status === 'info') {
+              message.info(data.message);
+            }
+            break;
+            
+          case 'cluster_dependencies_completed':
+            if (data.status === 'success') {
+              message.success(data.message);
+              // 触发全局刷新，更新集群状态
+              globalRefreshManager.triggerGlobalRefresh();
+            }
+            break;
+            
+          case 'cluster_dependencies_failed':
+            if (data.status === 'warning') {
+              message.warning(data.message);
+              // 即使失败也触发刷新，让用户看到集群
+              globalRefreshManager.triggerGlobalRefresh();
+            } else {
+              message.error(data.message);
+            }
+            break;
+            
+          case 'cluster_creation_cancelled':
+            if (data.status === 'info') {
+              message.info(data.message);
+            }
+            break;
+            
+          case 'cluster_creation_cancel_failed':
+            if (data.status === 'error') {
+              message.error(data.message);
+            }
+            break;
+            
           default:
             console.log('❓ Unknown message type:', data.type);
             break;

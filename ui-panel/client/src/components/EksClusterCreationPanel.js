@@ -98,52 +98,60 @@ const EksClusterCreationPanel = () => {
     
     console.log('🔍 Checking creation status for:', clusterTag);
     setStatusLoading(true);
+    
     try {
-      // 1. 先调用creating-clusters API触发后端状态检查和清理
+      // 检查creating-clusters状态（这是权威状态源）
       const creatingResponse = await fetch('/api/cluster/creating-clusters');
       const creatingResult = await creatingResponse.json();
       console.log('📊 Creating clusters check result:', creatingResult);
       
-      // 2. 再检查具体集群的创建状态
-      const response = await fetch(`/api/cluster/creation-status/${clusterTag}`);
-      const result = await response.json();
-      
-      console.log('📊 Creation status response:', result);
-      
-      if (result.success) {
+      if (creatingResult.success && creatingResult.clusters[clusterTag]) {
+        // 仍在创建中
+        const clusterInfo = creatingResult.clusters[clusterTag];
+        console.log('📊 Cluster info from creating-clusters:', clusterInfo);
+        
+        // 更新UI状态显示当前阶段
         setCreationStatus(prev => ({
           ...prev,
-          currentStackStatus: result.stackStatus,
+          phase: clusterInfo.phase || clusterInfo.currentStackStatus,
+          currentStackStatus: clusterInfo.currentStackStatus,
           lastChecked: new Date().toISOString()
         }));
         
-        console.log('📝 Updated status with:', result.stackStatus);
+        console.log('🔄 Still creating, current phase:', clusterInfo.phase);
         
-        // 如果创建完成或失败，停止检查
-        if (result.stackStatus === 'CREATE_COMPLETE' || 
-            result.stackStatus.includes('FAILED') || 
-            result.stackStatus.includes('ROLLBACK')) {
-          setCreationStatus(prev => ({ ...prev, status: 'COMPLETED' }));
-          console.log('✅ Creation completed with status:', result.stackStatus);
-          
-          // 如果创建成功，显示成功消息并自动清理UI状态
-          if (result.stackStatus === 'CREATE_COMPLETE') {
-            message.success(`Cluster ${clusterTag} created successfully! It will appear in the cluster list.`);
-            
-            // 3秒后自动清理UI状态
-            setTimeout(() => {
-              setCreationStatus(null);
-              console.log('🧹 Auto-cleared completed creation status');
-            }, 3000);
-          }
-        }
       } else {
-        console.log('❌ Failed to get creation status:', result.error);
+        // 不在creating-clusters中 = 真正完成
+        console.log('✅ Cluster not in creating-clusters, fully completed');
+        setCreationStatus(prev => ({ ...prev, status: 'COMPLETED' }));
+        message.success(`Cluster ${clusterTag} created successfully! Configure dependencies in Cluster Information.`);
       }
+      
     } catch (error) {
       console.error('❌ Failed to check creation status:', error);
     } finally {
       setStatusLoading(false);
+    }
+  };
+
+  // 取消创建
+  const cancelCreation = async () => {
+    if (!creationStatus?.clusterTag) return;
+    
+    try {
+      const response = await fetch(`/api/cluster/cancel-creation/${creationStatus.clusterTag}`, {
+        method: 'POST'
+      });
+      
+      const result = await response.json();
+      if (result.success) {
+        message.success('Cluster creation cancelled successfully');
+        setCreationStatus(null); // 清理UI状态
+      } else {
+        message.error(result.error || 'Failed to cancel cluster creation');
+      }
+    } catch (error) {
+      message.error('Failed to cancel cluster creation');
     }
   };
 
@@ -241,12 +249,11 @@ const EksClusterCreationPanel = () => {
     };
   }, [creationStatus]);
 
-  // 获取当前步骤
+  // 获取当前步骤（简化版）
   const getCurrentStep = () => {
     if (!creationStatus) return 0;
     if (creationStatus.status === 'IN_PROGRESS') return 1;
-    if (creationStatus.status === 'CONFIGURING_DEPENDENCIES') return 2;
-    if (creationStatus.status === 'COMPLETED') return 3;
+    if (creationStatus.status === 'COMPLETED') return 2;
     return 0;
   };
 
@@ -324,7 +331,6 @@ const EksClusterCreationPanel = () => {
                 <Alert
                   type="info"
                   message="Cluster creation typically takes 10-15 minutes"
-                  description="You will be able to monitor the progress in real-time once creation starts."
                   showIcon
                   style={{ marginTop: 16 }}
                 />
@@ -355,26 +361,11 @@ const EksClusterCreationPanel = () => {
                 >
                   Refresh
                 </Button>
-                {creationStatus?.status === 'COMPLETED' && (
-                  <Button 
-                    size="small"
-                    onClick={() => {
-                      setCreationStatus(null);
-                      message.success('Creation status cleared');
-                    }}
-                    title="Clear Completed Status"
-                  >
-                    Clear
-                  </Button>
-                )}
-                {creationStatus && (
+                {creationStatus && creationStatus.status !== 'COMPLETED' && (
                   <Button 
                     size="small" 
                     danger
-                    onClick={() => {
-                      // TODO: 实现取消创建功能
-                      message.info('Cancel will delete CloudFormation stack and clear all metadata');
-                    }}
+                    onClick={cancelCreation}
                   >
                     Cancel Creation
                   </Button>
@@ -402,15 +393,9 @@ const EksClusterCreationPanel = () => {
                       description: `Stack: ${creationStatus.stackName}`
                     },
                     {
-                      title: 'Configuring Dependencies',
-                      status: creationStatus.status === 'CONFIGURING_DEPENDENCIES' ? 'process' : 
-                             (getCurrentStep() > 2 ? 'finish' : 'wait'),
-                      description: 'Installing cluster dependencies'
-                    },
-                    {
-                      title: 'Registering Cluster',
+                      title: 'Cluster Created',
                       status: creationStatus.status === 'COMPLETED' ? 'finish' : 'wait',
-                      description: 'Adding to cluster management'
+                      description: 'EKS cluster ready. Configure dependencies in Cluster Information.'
                     }
                   ]}
                 />
@@ -455,21 +440,15 @@ const EksClusterCreationPanel = () => {
                       description: 'Ready to create infrastructure'
                     },
                     {
-                      title: 'Configuring Dependencies',
+                      title: 'Cluster Created',
                       status: 'wait',
-                      description: 'Ready to install cluster dependencies'
-                    },
-                    {
-                      title: 'Registering Cluster',
-                      status: 'wait',
-                      description: 'Ready to add to cluster management'
+                      description: 'Ready to register cluster'
                     }
                   ]}
                 />
                 
                 <div style={{ marginTop: 24, textAlign: 'center', color: '#999' }}>
-                  <CloudServerOutlined style={{ fontSize: '48px', marginBottom: '16px' }} />
-                  <div>Fill in the form and click "Create Cluster" to start</div>
+                  <Text type="secondary">Ready to create cluster</Text>
                 </div>
               </>
             )}

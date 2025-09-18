@@ -7,7 +7,7 @@ import EksNodeGroupCreationPanel from './EksNodeGroupCreationPanel';
 
 const { Text } = Typography;
 
-const NodeGroupManager = () => {
+const NodeGroupManager = ({ dependenciesConfigured = false, activeCluster, onDependencyStatusChange, onRefreshClusterDetails }) => {
   const [loading, setLoading] = useState(false);
   const [scaleLoading, setScaleLoading] = useState(false);
   const [eksNodeGroups, setEksNodeGroups] = useState([]);
@@ -124,6 +124,21 @@ const NodeGroupManager = () => {
       } else {
         message.error(`Failed to fetch node groups: ${data.error}`);
       }
+
+      // 同时检查依赖状态
+      if (onDependencyStatusChange && activeCluster) {
+        try {
+          const depResponse = await fetch(`/api/cluster/${activeCluster}/dependencies/status`);
+          const depResult = await depResponse.json();
+          if (depResult.success) {
+            onDependencyStatusChange(depResult.dependencies?.configured || false);
+          }
+        } catch (error) {
+          console.error('Failed to fetch dependency status:', error);
+          onDependencyStatusChange(false);
+        }
+      }
+      
     } catch (error) {
       message.error(`Error fetching node groups: ${error.message}`);
     } finally {
@@ -329,6 +344,9 @@ const NodeGroupManager = () => {
           onClick={() => {
             fetchNodeGroups();
             checkHyperPodCreationStatus();
+            if (onRefreshClusterDetails) {
+              onRefreshClusterDetails();
+            }
           }}
           loading={loading}
           size="small"
@@ -351,15 +369,18 @@ const NodeGroupManager = () => {
               fetchClusterInfo(); // 确保获取最新信息
             }}
             disabled={
-              !!hyperPodCreationStatus || // 创建中时禁用
+              !dependenciesConfigured ||   // 依赖未配置时禁用
+              !!hyperPodCreationStatus ||  // 创建中时禁用
               hyperPodGroups.length > 0    // 已存在HyperPod时禁用
             }
             title={
-              hyperPodCreationStatus 
-                ? "HyperPod creation in progress" 
-                : hyperPodGroups.length > 0 
-                  ? "HyperPod cluster already exists in this EKS cluster"
-                  : "Create HyperPod cluster"
+              !dependenciesConfigured 
+                ? "Dependencies must be configured first"
+                : hyperPodCreationStatus 
+                  ? "HyperPod creation in progress" 
+                  : hyperPodGroups.length > 0 
+                    ? "HyperPod cluster already exists in this EKS cluster"
+                    : "Create HyperPod cluster"
             }
           >
             Create HyperPod
@@ -407,6 +428,12 @@ const NodeGroupManager = () => {
             size="small"
             icon={<PlusOutlined />}
             onClick={() => setCreateEksNodeGroupModalVisible(true)}
+            disabled={!dependenciesConfigured}
+            title={
+              !dependenciesConfigured 
+                ? "Dependencies must be configured first"
+                : "Create Node Group"
+            }
           >
             Create Node Group
           </Button>

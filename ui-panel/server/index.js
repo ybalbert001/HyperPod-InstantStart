@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const WebSocket = require('ws');
-const { exec, spawn } = require('child_process');
+const { exec, spawn, execSync } = require('child_process');
 const fs = require('fs-extra');
 const YAML = require('yaml');
 const path = require('path');
@@ -4826,17 +4826,20 @@ function updateCreatingClustersStatus(clusterTag, status, additionalData = {}) {
   const path = require('path');
   const creatingClustersPath = path.join(__dirname, '../managed_clusters_info/creating-clusters.json');
   
+  console.log(`🔄 Updating creating status for ${clusterTag}: ${status}`);
+  
   let creatingClusters = {};
   if (fs.existsSync(creatingClustersPath)) {
     creatingClusters = JSON.parse(fs.readFileSync(creatingClustersPath, 'utf8'));
   }
   
-  if (creatingClusters[clusterTag]) {
-    if (status === 'COMPLETED' || status === 'FAILED') {
-      // 创建完成或失败，从跟踪文件中移除
-      delete creatingClusters[clusterTag];
-    } else {
-      // 更新状态
+  if (status === 'COMPLETED') {
+    // 完成时删除记录
+    delete creatingClusters[clusterTag];
+    console.log(`✅ Removed ${clusterTag} from creating-clusters (completed)`);
+  } else {
+    // 更新状态和附加数据
+    if (creatingClusters[clusterTag]) {
       creatingClusters[clusterTag] = {
         ...creatingClusters[clusterTag],
         status: status,
@@ -4844,8 +4847,9 @@ function updateCreatingClustersStatus(clusterTag, status, additionalData = {}) {
         ...additionalData
       };
     }
-    fs.writeFileSync(creatingClustersPath, JSON.stringify(creatingClusters, null, 2));
   }
+  
+  fs.writeFileSync(creatingClustersPath, JSON.stringify(creatingClusters, null, 2));
 }
 
 // 获取正在创建的集群列表
@@ -4868,18 +4872,25 @@ app.get('/api/cluster/creating-clusters', async (req, res) => {
           const stackStatus = await CloudFormationManager.getStackStatus(clusterInfo.stackName, clusterInfo.region);
           clusterInfo.currentStackStatus = stackStatus.stackStatus;
           
-          // 如果EKS集群创建完成，触发依赖配置
-          if (stackStatus.stackStatus === 'CREATE_COMPLETE') {
-            console.log(`EKS cluster ${clusterTag} creation completed, configuring dependencies...`);
+          // 如果EKS集群创建完成，注册基础集群（不自动配置依赖）
+          if (stackStatus.stackStatus === 'CREATE_COMPLETE' && 
+              clusterInfo.currentStackStatus !== 'COMPLETED') {
+            console.log(`EKS cluster ${clusterTag} creation completed, registering basic cluster...`);
             
-            // 异步配置依赖，不阻塞API响应
-            setImmediate(async () => {
-              try {
-                await configureClusterDependencies(clusterTag);
-              } catch (error) {
-                console.error(`Failed to configure dependencies for ${clusterTag}:`, error);
-              }
+            // 注册基础集群（dependencies.configured = false）
+            await registerCompletedCluster(clusterTag, 'active');
+            
+            // 清理creating状态
+            updateCreatingClustersStatus(clusterTag, 'COMPLETED');
+            
+            // 广播集群创建完成
+            broadcast({
+              type: 'cluster_creation_completed',
+              status: 'success',
+              message: `EKS cluster ${clusterTag} created successfully. Configure dependencies in Cluster Information.`,
+              clusterTag: clusterTag
             });
+            
           } else if (stackStatus.stackStatus.includes('FAILED') || stackStatus.stackStatus.includes('ROLLBACK')) {
             // 创建失败，清理状态
             console.log(`EKS cluster ${clusterTag} creation failed, cleaning up...`);
@@ -4906,35 +4917,105 @@ app.get('/api/cluster/creating-clusters', async (req, res) => {
   }
 });
 
+// 防止并发配置的互斥锁
+const configurationMutex = new Set();
+
 // 配置集群依赖（helm等）
 async function configureClusterDependencies(clusterTag) {
+  // 检查是否已经在配置中
+  if (configurationMutex.has(clusterTag)) {
+    console.log(`Dependencies configuration already in progress for ${clusterTag}, skipping...`);
+    return;
+  }
+  
+  // 添加到互斥锁
+  configurationMutex.add(clusterTag);
+  
   try {
     console.log(`Configuring dependencies for cluster: ${clusterTag}`);
     
-    // 使用ClusterDependencyManager进行配置
+    // 1. 更新状态为配置依赖中
+    updateCreatingClustersStatus(clusterTag, 'IN_PROGRESS', { 
+      phase: 'CONFIGURING_DEPENDENCIES',
+      currentStackStatus: 'CONFIGURING_DEPENDENCIES'
+    });
+    
+    // 2. 先注册基础集群信息（让集群立即出现在列表中）
+    await registerCompletedCluster(clusterTag, 'configuring');
+    
+    // 3. 广播依赖配置开始
+    broadcast({
+      type: 'cluster_dependencies_started',
+      status: 'info',
+      message: `Configuring dependencies for cluster: ${clusterTag}`,
+      clusterTag: clusterTag
+    });
+    
+    // 4. 配置依赖
     await ClusterDependencyManager.configureClusterDependencies(clusterTag, clusterManager);
     
     console.log(`Successfully configured dependencies for cluster: ${clusterTag}`);
     
-    // 更新状态为完成
+    // 5. 更新集群状态为active
+    await updateClusterStatus(clusterTag, 'active');
+    
+    // 6. 最后清理creating状态
     updateCreatingClustersStatus(clusterTag, 'COMPLETED');
     
-    // 注册完成的集群
-    await registerCompletedCluster(clusterTag);
+    // 7. 广播完成
+    broadcast({
+      type: 'cluster_creation_completed',
+      status: 'success',
+      message: `Cluster ${clusterTag} is now ready and available`,
+      clusterTag: clusterTag
+    });
     
   } catch (error) {
     console.error(`Error configuring dependencies for cluster ${clusterTag}:`, error);
-    updateCreatingClustersStatus(clusterTag, 'DEPENDENCY_CONFIG_FAILED', { error: error.message });
     
     // 即使依赖配置失败，也要注册集群（让用户能看到集群）
     console.log(`Registering cluster ${clusterTag} despite dependency configuration failure`);
     try {
-      await registerCompletedCluster(clusterTag, 'dependency-failed');
+      await registerCompletedCluster(clusterTag, 'active'); // 即使失败也设为active
     } catch (registerError) {
-      console.error(`Failed to register cluster ${clusterTag} after dependency failure:`, registerError);
+      console.error(`Failed to register cluster ${clusterTag}:`, registerError);
     }
     
-    throw error;
+    // 清除creating状态
+    updateCreatingClustersStatus(clusterTag, 'COMPLETED');
+    
+    // 广播依赖配置失败
+    broadcast({
+      type: 'cluster_dependencies_failed',
+      status: 'warning',
+      message: `Dependencies configuration failed for cluster: ${clusterTag}, but cluster is still available`,
+      clusterTag: clusterTag
+    });
+    
+  } finally {
+    // 移除互斥锁
+    configurationMutex.delete(clusterTag);
+  }
+}
+
+// 更新已存在集群的状态
+async function updateClusterStatus(clusterTag, status) {
+  const fs = require('fs');
+  const path = require('path');
+  
+  try {
+    const metadataDir = clusterManager.getClusterMetadataDir(clusterTag);
+    const clusterInfoPath = path.join(metadataDir, 'cluster_info.json');
+    
+    if (fs.existsSync(clusterInfoPath)) {
+      const clusterInfo = JSON.parse(fs.readFileSync(clusterInfoPath, 'utf8'));
+      clusterInfo.status = status;
+      clusterInfo.lastModified = new Date().toISOString();
+      fs.writeFileSync(clusterInfoPath, JSON.stringify(clusterInfo, null, 2));
+      console.log(`Updated cluster ${clusterTag} status to: ${status}`);
+    }
+  } catch (error) {
+    console.error(`Failed to update cluster status for ${clusterTag}:`, error);
   }
 }
 
@@ -4950,14 +5031,17 @@ async function registerCompletedCluster(clusterTag, status = 'active') {
     const metadataDir = clusterManager.getClusterMetadataDir(clusterTag);
     const creationMetadataPath = path.join(metadataDir, 'creation_metadata.json');
     
+    console.log(`Looking for creation metadata at: ${creationMetadataPath}`);
+    
     if (!fs.existsSync(creationMetadataPath)) {
       console.error(`Creation metadata not found for cluster: ${clusterTag}`);
-      return;
+      console.log(`Metadata directory contents:`, fs.existsSync(metadataDir) ? fs.readdirSync(metadataDir) : 'Directory does not exist');
+      throw new Error(`Creation metadata not found for cluster: ${clusterTag}`);
     }
     
     const creationMetadata = JSON.parse(fs.readFileSync(creationMetadataPath, 'utf8'));
     
-    // 生成cluster_info.json（兼容现有格式）
+    // 生成cluster_info.json（兼容现有格式 + 新增dependencies字段）
     const clusterInfo = {
       clusterTag: clusterTag,
       region: creationMetadata.userConfig.awsRegion,
@@ -4966,6 +5050,19 @@ async function registerCompletedCluster(clusterTag, status = 'active') {
       createdAt: creationMetadata.createdAt,
       lastModified: new Date().toISOString(),
       source: 'ui-panel-creation',
+      dependencies: {
+        configured: false,
+        status: 'pending',
+        lastAttempt: null,
+        lastSuccess: null,
+        components: {
+          helmDependencies: false,
+          nlbController: false,
+          s3CsiDriver: false,
+          kuberayOperator: false,
+          certManager: false
+        }
+      },
       cloudFormation: {
         stackName: creationMetadata.cloudFormation.stackName,
         stackId: creationMetadata.cloudFormation.stackId
@@ -4999,7 +5096,243 @@ async function registerCompletedCluster(clusterTag, status = 'active') {
   }
 }
 
-// 清理creating metadata（不触碰CloudFormation）
+// 独立依赖配置API - 针对当前active集群
+app.post('/api/cluster/configure-dependencies', async (req, res) => {
+  try {
+    // 获取当前active集群
+    const activeCluster = clusterManager.getActiveCluster();
+    if (!activeCluster) {
+      return res.status(400).json({ error: 'No active cluster selected' });
+    }
+
+    // 检查集群是否存在
+    const clusterInfo = await getClusterInfo(activeCluster);
+    if (!clusterInfo) {
+      return res.status(400).json({ error: 'Active cluster not found' });
+    }
+
+    // 检查是否已配置或正在配置中
+    if (clusterInfo.dependencies?.configured) {
+      return res.status(400).json({ error: 'Dependencies already configured' });
+    }
+
+    if (clusterInfo.dependencies?.status === 'configuring') {
+      return res.status(400).json({ error: 'Dependencies configuration already in progress' });
+    }
+
+    // 更新状态为配置中
+    await updateDependencyStatus(activeCluster, 'configuring');
+
+    // 异步执行配置
+    process.nextTick(() => {
+      configureDependenciesForActiveCluster(activeCluster).catch(error => {
+        console.error(`Dependency configuration failed for ${activeCluster}:`, error);
+        updateDependencyStatus(activeCluster, 'failed', { error: error.message });
+      });
+    });
+
+    res.json({ 
+      success: true, 
+      message: `Dependency configuration started for cluster: ${activeCluster}`,
+      clusterTag: activeCluster
+    });
+
+  } catch (error) {
+    console.error('Error starting dependency configuration:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 获取依赖配置状态
+app.get('/api/cluster/:clusterTag/dependencies/status', async (req, res) => {
+  try {
+    const { clusterTag } = req.params;
+    const clusterInfo = await getClusterInfo(clusterTag);
+
+    if (!clusterInfo) {
+      return res.status(404).json({ error: 'Cluster not found' });
+    }
+
+    res.json({
+      success: true,
+      clusterTag: clusterTag,
+      dependencies: clusterInfo.dependencies || { 
+        configured: false, 
+        status: 'pending',
+        components: {}
+      }
+    });
+
+  } catch (error) {
+    console.error('Error getting dependency status:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 取消集群创建
+app.post('/api/cluster/cancel-creation/:clusterTag', async (req, res) => {
+  try {
+    const { clusterTag } = req.params;
+    
+    // 1. 获取创建状态信息
+    const creatingClustersPath = path.join(__dirname, '../managed_clusters_info/creating-clusters.json');
+    if (!fs.existsSync(creatingClustersPath)) {
+      return res.status(404).json({ error: 'No creating clusters found' });
+    }
+    
+    const creatingClusters = JSON.parse(fs.readFileSync(creatingClustersPath, 'utf8'));
+    const clusterInfo = creatingClusters[clusterTag];
+    
+    if (!clusterInfo) {
+      return res.status(404).json({ error: 'Cluster creation not found' });
+    }
+    
+    console.log(`Canceling creation for cluster: ${clusterTag}`);
+    
+    // 2. 删除CloudFormation Stack（异步触发）
+    if (clusterInfo.stackName && clusterInfo.region) {
+      process.nextTick(() => {
+        try {
+          const deleteCmd = `aws cloudformation delete-stack --stack-name ${clusterInfo.stackName} --region ${clusterInfo.region}`;
+          execSync(deleteCmd, { stdio: 'inherit' });
+          console.log(`CloudFormation stack deletion triggered: ${clusterInfo.stackName}`);
+          
+          // 广播删除开始
+          broadcast({
+            type: 'cluster_creation_cancelled',
+            status: 'info',
+            message: `CloudFormation stack deletion started: ${clusterInfo.stackName}`,
+            clusterTag: clusterTag
+          });
+        } catch (error) {
+          console.error(`Failed to delete CloudFormation stack: ${error.message}`);
+          broadcast({
+            type: 'cluster_creation_cancel_failed',
+            status: 'error',
+            message: `Failed to delete CloudFormation stack: ${error.message}`,
+            clusterTag: clusterTag
+          });
+        }
+      });
+    }
+    
+    // 3. 清理metadata
+    cleanupCreatingMetadata(clusterTag);
+    
+    res.json({ 
+      success: true, 
+      message: `Cluster creation cancelled: ${clusterTag}`,
+      clusterTag: clusterTag
+    });
+    
+  } catch (error) {
+    console.error('Error canceling cluster creation:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 获取集群信息
+async function getClusterInfo(clusterTag) {
+  try {
+    const metadataDir = clusterManager.getClusterMetadataDir(clusterTag);
+    const clusterInfoPath = path.join(metadataDir, 'cluster_info.json');
+    
+    if (fs.existsSync(clusterInfoPath)) {
+      return JSON.parse(fs.readFileSync(clusterInfoPath, 'utf8'));
+    }
+    return null;
+  } catch (error) {
+    console.error(`Error getting cluster info for ${clusterTag}:`, error);
+    return null;
+  }
+}
+
+// 更新依赖配置状态
+async function updateDependencyStatus(clusterTag, status, additionalData = {}) {
+  try {
+    const metadataDir = clusterManager.getClusterMetadataDir(clusterTag);
+    const clusterInfoPath = path.join(metadataDir, 'cluster_info.json');
+    
+    if (fs.existsSync(clusterInfoPath)) {
+      const clusterInfo = JSON.parse(fs.readFileSync(clusterInfoPath, 'utf8'));
+      
+      clusterInfo.dependencies = {
+        ...clusterInfo.dependencies,
+        status: status,
+        lastAttempt: new Date().toISOString(),
+        ...(status === 'success' && { 
+          configured: true, 
+          lastSuccess: new Date().toISOString() 
+        }),
+        ...additionalData
+      };
+      
+      clusterInfo.lastModified = new Date().toISOString();
+      fs.writeFileSync(clusterInfoPath, JSON.stringify(clusterInfo, null, 2));
+      console.log(`Updated dependency status for ${clusterTag}: ${status}`);
+    }
+  } catch (error) {
+    console.error(`Error updating dependency status for ${clusterTag}:`, error);
+  }
+}
+
+// 针对当前active集群配置依赖
+async function configureDependenciesForActiveCluster(clusterTag) {
+  try {
+    console.log(`Configuring dependencies for active cluster: ${clusterTag}`);
+    
+    // 广播开始配置
+    broadcast({
+      type: 'cluster_dependencies_started',
+      status: 'info',
+      message: `Configuring dependencies for cluster: ${clusterTag}`,
+      clusterTag: clusterTag
+    });
+    
+    // 使用现有的ClusterDependencyManager进行配置
+    await ClusterDependencyManager.configureClusterDependencies(clusterTag, clusterManager);
+    
+    console.log(`Successfully configured dependencies for cluster: ${clusterTag}`);
+    
+    // 更新状态为成功
+    await updateDependencyStatus(clusterTag, 'success', {
+      components: {
+        helmDependencies: true,
+        nlbController: true,
+        s3CsiDriver: true,
+        kuberayOperator: true,
+        certManager: true
+      }
+    });
+    
+    // 广播完成
+    broadcast({
+      type: 'cluster_dependencies_completed',
+      status: 'success',
+      message: `Dependencies configured successfully for cluster: ${clusterTag}`,
+      clusterTag: clusterTag
+    });
+    
+  } catch (error) {
+    console.error(`Error configuring dependencies for cluster ${clusterTag}:`, error);
+    
+    // 更新状态为失败
+    await updateDependencyStatus(clusterTag, 'failed', { 
+      error: error.message,
+      failedAt: new Date().toISOString()
+    });
+    
+    // 广播失败
+    broadcast({
+      type: 'cluster_dependencies_failed',
+      status: 'error',
+      message: `Dependencies configuration failed for cluster: ${clusterTag}`,
+      clusterTag: clusterTag,
+      error: error.message
+    });
+  }
+}
+
 function cleanupCreatingMetadata(clusterTag) {
   const fs = require('fs');
   const path = require('path');

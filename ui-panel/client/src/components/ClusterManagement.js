@@ -45,12 +45,165 @@ const { Title, Text } = Typography;
 const { Step } = Steps;
 const { Option } = Select;
 
+// 依赖配置状态显示组件（简化版）
+const DependencyStatus = ({ dependenciesConfigured }) => {
+  // 获取状态显示
+  const getDependencyStatusDisplay = () => {
+    if (dependenciesConfigured === undefined) return <Text type="secondary">Loading...</Text>;
+    
+    if (dependenciesConfigured) {
+      return <Tag color="green">Configured</Tag>;
+    } else {
+      return <Tag color="warning">Not Configured</Tag>;
+    }
+  };
+
+  return getDependencyStatusDisplay();
+};
+
+// 依赖配置按钮组件
+const DependencyConfigButton = ({ clusterTag }) => {
+  const [depStatus, setDepStatus] = useState(null);
+  const [configuring, setConfiguring] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  // 获取依赖状态
+  const fetchDependencyStatus = async () => {
+    try {
+      const response = await fetch(`/api/cluster/${clusterTag}/dependencies/status`);
+      const result = await response.json();
+      if (result.success) {
+        setDepStatus(result.dependencies);
+      }
+    } catch (error) {
+      console.error('Failed to fetch dependency status:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 配置依赖
+  const configureDependencies = async () => {
+    setConfiguring(true);
+    try {
+      const response = await fetch('/api/cluster/configure-dependencies', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      const result = await response.json();
+      if (result.success) {
+        message.success('Dependency configuration started');
+        setDepStatus(prev => ({ ...prev, status: 'configuring' }));
+        // 开始轮询状态
+        pollDependencyStatus();
+      } else {
+        message.error(result.error || 'Failed to start dependency configuration');
+      }
+    } catch (error) {
+      message.error('Failed to start dependency configuration');
+    } finally {
+      setConfiguring(false);
+    }
+  };
+
+  // 轮询状态
+  const pollDependencyStatus = () => {
+    const interval = setInterval(async () => {
+      await fetchDependencyStatus();
+      if (depStatus?.status !== 'configuring') {
+        clearInterval(interval);
+      }
+    }, 3000);
+  };
+
+  useEffect(() => {
+    if (clusterTag) {
+      fetchDependencyStatus();
+    }
+  }, [clusterTag]);
+
+  // 获取按钮文本和状态
+  const getButtonProps = () => {
+    if (loading) {
+      return {
+        text: 'Loading...',
+        disabled: true,
+        type: 'default',
+        icon: <SettingOutlined />
+      };
+    }
+
+    if (!depStatus) {
+      return {
+        text: 'Configure Dependencies',
+        disabled: true,
+        type: 'default',
+        icon: <SettingOutlined />
+      };
+    }
+
+    switch (depStatus.status) {
+      case 'pending':
+        return {
+          text: 'Configure Dependencies',
+          disabled: false,
+          type: 'primary',
+          icon: <SettingOutlined />
+        };
+      case 'configuring':
+        return {
+          text: 'Configuring...',
+          disabled: true,
+          type: 'primary',
+          icon: <SettingOutlined />
+        };
+      case 'success':
+        return {
+          text: 'Dependencies Configured',
+          disabled: true,
+          type: 'default',
+          icon: <CheckCircleOutlined />
+        };
+      case 'failed':
+        return {
+          text: 'Retry Configuration',
+          disabled: false,
+          type: 'default',
+          icon: <ReloadOutlined />
+        };
+      default:
+        return {
+          text: 'Configure Dependencies',
+          disabled: true,
+          type: 'default',
+          icon: <SettingOutlined />
+        };
+    }
+  };
+
+  const buttonProps = getButtonProps();
+
+  return (
+    <Button 
+      type={buttonProps.type}
+      loading={configuring}
+      disabled={buttonProps.disabled}
+      onClick={configureDependencies}
+      icon={buttonProps.icon}
+    >
+      {buttonProps.text}
+    </Button>
+  );
+};
+
 const ClusterManagement = () => {
   // 多集群状态管理
   const [clusters, setClusters] = useState([]);
   const [activeCluster, setActiveCluster] = useState(null);
   const [clustersLoading, setClustersLoading] = useState(false);
   const [clusterDetails, setClusterDetails] = useState(null);
+  const [dependenciesConfigured, setDependenciesConfigured] = useState(false);
   
   // 导入现有集群状态
   const [showImportModal, setShowImportModal] = useState(false);
@@ -800,16 +953,21 @@ const ClusterManagement = () => {
                           </Col>
                         </Row>
 
-                        {/* 导入集群按钮 */}
+                        {/* 集群操作按钮 */}
                         <Row style={{ marginBottom: 24 }}>
                           <Col>
-                            <Button 
-                              type="default"
-                              icon={<ImportOutlined />} 
-                              onClick={() => setShowImportModal(true)}
-                            >
-                              Import Existing Cluster
-                            </Button>
+                            <Space>
+                              {activeCluster && (
+                                <DependencyConfigButton clusterTag={activeCluster} />
+                              )}
+                              <Button 
+                                type="default"
+                                icon={<ImportOutlined />} 
+                                onClick={() => setShowImportModal(true)}
+                              >
+                                Import Existing Cluster
+                              </Button>
+                            </Space>
                           </Col>
                         </Row>
 
@@ -858,19 +1016,28 @@ const ClusterManagement = () => {
                                     </Col>
                                     <Col span={12}>
                                       <div>
-                                        <Text strong>VPC ID:</Text>
+                                        <Text strong>Computer Node VPC:</Text>
                                         <br />
                                         <Text code>{vpcId}</Text>
                                       </div>
                                     </Col>
                                   </Row>
-                                  <div>
-                                    <Text strong>Creation Type:</Text>
-                                    <br />
-                                    <Space>
-                                      <Tag color={creationColor}>{creationType}</Tag>
-                                    </Space>
-                                  </div>
+                                  <Row gutter={[16, 16]}>
+                                    <Col span={12}>
+                                      <div>
+                                        <Text strong>Creation Type:</Text>
+                                        <br />
+                                        <Tag color={creationColor}>{creationType}</Tag>
+                                      </div>
+                                    </Col>
+                                    <Col span={12}>
+                                      <div>
+                                        <Text strong>Dependencies:</Text>
+                                        <br />
+                                        <DependencyStatus dependenciesConfigured={dependenciesConfigured} />
+                                      </div>
+                                    </Col>
+                                  </Row>
                                 </Space>
                               );
                             })()}
@@ -882,7 +1049,12 @@ const ClusterManagement = () => {
                     {/* 右侧：Node Groups */}
                     <Col xs={24} lg={14}>
                       {activeCluster ? (
-                        <NodeGroupManager />
+                        <NodeGroupManager 
+                          dependenciesConfigured={dependenciesConfigured}
+                          activeCluster={activeCluster}
+                          onDependencyStatusChange={setDependenciesConfigured}
+                          onRefreshClusterDetails={fetchClusterDetails}
+                        />
                       ) : (
                         <Card title="Node Groups" style={{ height: '100%' }}>
                           <div style={{ 

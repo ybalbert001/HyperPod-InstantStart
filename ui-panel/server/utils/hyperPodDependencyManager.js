@@ -48,7 +48,7 @@ class HyperPodDependencyManager {
     ATTEMPT=0
     
     while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-      STATUS=$(aws sagemaker describe-cluster --cluster-name $HP_CLUSTER_NAME --region $AWS_REGION --query "ClusterStatus" --output text 2>/dev/null || echo "NOT_FOUND")
+      STATUS=$(aws sagemaker describe-cluster --cluster-name $HP_CLUSTER_NAME --region $AWS_REGION --query "ClusterStatus" --output text >> /app/tmp/dependency-install.log 2>&1 || echo "NOT_FOUND")
       
       if [ "$STATUS" = "InService" ]; then
         echo "HyperPod cluster is ready (InService)"
@@ -74,22 +74,82 @@ class HyperPodDependencyManager {
   }
 
   /**
-   * 安装HyperPod专用依赖
+   * 安装HyperPod专用依赖（带容错机制）
    */
   static async installHyperPodDependencies(configDir) {
-    console.log('Installing HyperPod-specific dependencies...');
+    console.log('Installing HyperPod-specific dependencies with fault tolerance...');
     
-    const commands = `cd ${configDir} && bash -c 'source init_envs && 
+    const commands = `cd ${configDir} && bash -c 'source init_envs && source stack_envs && 
 
-    # 创建HyperPod Training Operator addon
+    echo "=== Phase 1: Cleanup failed installations ==="
+    
+    echo "Cleaning up HyperPod Training Operator addon..."
+    aws eks delete-addon \\
+        --cluster-name \$EKS_CLUSTER_NAME \\
+        --addon-name amazon-sagemaker-hyperpod-training-operator \\
+        --region \$AWS_REGION >> /app/tmp/dependency-install.log 2>&1 || echo "HyperPod Training Operator addon not found"
+    
+    echo "Cleaning up cert-manager addon..."
+    aws eks delete-addon \\
+        --cluster-name \$EKS_CLUSTER_NAME \\
+        --addon-name cert-manager \\
+        --region \$AWS_REGION >> /app/tmp/dependency-install.log 2>&1 || echo "cert-manager addon not found"
+    
+    echo "Waiting for cleanup to complete..."
+    sleep 30
+    
+    echo "=== Phase 2: Fresh installation ==="
+    
+    # 3. 确保Pod Identity Association存在（不删除，只确保创建）
+    echo "Ensuring Pod Identity Association exists..."
+    aws eks create-pod-identity-association \\
+        --cluster-name \$EKS_CLUSTER_NAME \\
+        --role-arn \$EXECUTION_ROLE \\
+        --namespace aws-hyperpod \\
+        --service-account hp-training-operator-controller-manager \\
+        --region \$AWS_REGION >> /app/tmp/dependency-install.log 2>&1 || echo "Pod Identity Association exists checked"
+
+    # 4. 重新创建cert-manager addon
+    echo "Creating cert-manager addon..."
+    aws eks create-addon \\
+        --cluster-name \$EKS_CLUSTER_NAME \\
+        --addon-name cert-manager \\
+        --region \$AWS_REGION \\
+        --resolve-conflicts OVERWRITE || echo "Failed to create cert-manager addon"
+
+    # 5. 等待cert-manager就绪
+    echo "Waiting for cert-manager to be ready..."
+    MAX_WAIT=20
+    WAIT_COUNT=0
+    
+    while [ \$WAIT_COUNT -lt \$MAX_WAIT ]; do
+        CERT_STATUS=\$(aws eks describe-addon \\
+            --cluster-name \$EKS_CLUSTER_NAME \\
+            --addon-name cert-manager \\
+            --region \$AWS_REGION \\
+            --query "addon.status" \\
+            --output text >> /app/tmp/dependency-install.log 2>&1 || echo "UNKNOWN")
+        
+        if [ "\$CERT_STATUS" = "ACTIVE" ]; then
+            echo "cert-manager is ready (ACTIVE)"
+            break
+        elif [ "\$CERT_STATUS" = "CREATE_FAILED" ]; then
+            echo "WARNING: cert-manager creation failed, but continuing..."
+            break
+        else
+            echo "cert-manager status: \$CERT_STATUS, waiting... (\$((WAIT_COUNT+1))/\$MAX_WAIT)"
+            sleep 15
+            WAIT_COUNT=\$((WAIT_COUNT+1))
+        fi
+    done
+
+    # 6. 重新创建HyperPod Training Operator addon
     echo "Creating HyperPod Training Operator addon..."
     aws eks create-addon \\
         --cluster-name \$EKS_CLUSTER_NAME \\
         --addon-name amazon-sagemaker-hyperpod-training-operator \\
-        --region \$AWS_REGION
-    
-    
-    #    --resolve-conflicts OVERWRITE || echo "HyperPod Training Operator addon already exists"
+        --region \$AWS_REGION \\
+        --resolve-conflicts OVERWRITE || echo "Failed to create HyperPod Training Operator addon"
 
     echo "=== All HyperPod dependencies installed successfully ==="
     '`;
@@ -107,7 +167,7 @@ class HyperPodDependencyManager {
       # 检查HyperPod Training Operator addon状态
       if [ -f "stack_envs" ]; then
         source stack_envs
-        aws eks describe-addon --cluster-name $EKS_CLUSTER_NAME --addon-name amazon-sagemaker-hyperpod-training-operator --region $AWS_REGION --query "addon.status" --output text 2>/dev/null || echo "NOT_INSTALLED"
+        aws eks describe-addon --cluster-name $EKS_CLUSTER_NAME --addon-name amazon-sagemaker-hyperpod-training-operator --region $AWS_REGION --query "addon.status" --output text >> /app/tmp/dependency-install.log 2>&1 || echo "NOT_INSTALLED"
       else
         echo "NO_CLOUDFORMATION"
       fi
