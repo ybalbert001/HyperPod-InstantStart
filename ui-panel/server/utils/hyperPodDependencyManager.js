@@ -1,4 +1,4 @@
-const { execSync } = require('child_process');
+const { execSync, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -205,7 +205,7 @@ class HyperPodDependencyManager {
     echo "=== Installing KubeRay Operator ==="
     helm repo add kuberay https://ray-project.github.io/kuberay-helm/
     helm repo update
-    helm install kuberay-operator kuberay/kuberay-operator --version 1.2.0 --namespace kube-system || echo "KubeRay Operator already exists"
+    helm upgrade --install kuberay-operator kuberay/kuberay-operator --namespace kubeflow --timeout=300s || echo "KubeRay Operator installation failed"
 
     echo "=== All HyperPod dependencies installed successfully ==="
     '`;
