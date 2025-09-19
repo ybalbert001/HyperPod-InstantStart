@@ -218,11 +218,43 @@ const EksClusterCreationPanel = () => {
 
 
 
+  // 获取当前AWS region作为默认值
+  const fetchCurrentRegion = async () => {
+    try {
+      const response = await fetch('/api/aws/current-region');
+      const result = await response.json();
+      if (result.success && result.region) {
+        form.setFieldsValue({
+          awsRegion: result.region
+        });
+      }
+    } catch (error) {
+      console.error('Failed to fetch current region:', error);
+      // 如果获取失败，使用默认值
+      form.setFieldsValue({
+        awsRegion: 'us-west-1'
+      });
+    }
+  };
+
+  // 生成默认集群标签
+  const generateClusterTag = () => {
+    const now = new Date();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const uuid4 = crypto.randomUUID().substring(0, 4);
+    return `hypd-${month}${day}-${uuid4}`;
+  };
+
   // 初始化默认值并恢复创建状态
   useEffect(() => {
+    // 设置默认集群标签
     form.setFieldsValue({
-      awsRegion: 'us-east-1'
+      clusterTag: generateClusterTag()
     });
+    
+    // 获取当前region作为默认值
+    fetchCurrentRegion();
     
     // 恢复创建状态（如果有的话）
     restoreCreationStatus();
@@ -301,7 +333,7 @@ const EksClusterCreationPanel = () => {
                     label="AWS Region"
                     rules={[{ required: true, message: 'Please enter AWS region' }]}
                   >
-                    <Input placeholder="us-east-1" />
+                    <Input placeholder="us-east-1" disabled />
                   </Form.Item>
                 </Col>
               </Row>

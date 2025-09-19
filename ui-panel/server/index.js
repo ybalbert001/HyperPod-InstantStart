@@ -10,6 +10,7 @@ const http = require('http');
 
 // 引入工具模块
 const HyperPodDependencyManager = require('./utils/hyperPodDependencyManager');
+const { getCurrentRegion } = require('./utils/awsHelpers');
 
 // 引入集群状态V2模块
 const { 
@@ -5517,6 +5518,24 @@ app.get('/api/cluster/info', async (req, res) => {
   } catch (error) {
     console.error('Error getting cluster info:', error);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 获取当前AWS配置的region
+app.get('/api/aws/current-region', async (req, res) => {
+  try {
+    const region = await getCurrentRegion();
+    res.json({
+      success: true,
+      region
+    });
+  } catch (error) {
+    console.error('Failed to get current AWS region:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      region: 'us-west-1' // 提供默认值
+    });
   }
 });
 

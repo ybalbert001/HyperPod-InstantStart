@@ -10,7 +10,7 @@ class ClusterDependencyManager {
   static async executeNonBlocking(command, options = {}) {
     return new Promise((resolve, reject) => {
       // 添加日志头部
-      const logFile = '/app/tmp/dependency-install.log';
+      const logFile = '/app/tmp/cluster-dependency.log';
       const timestamp = new Date().toISOString();
       const logHeader = `\n=== ${timestamp} ===\nExecuting: ${command.substring(0, 100)}...\n`;
       
@@ -184,7 +184,7 @@ helm upgrade --install hyperpod-dependencies ./sagemaker-hyperpod-cli/helm_chart
   --set trainingOperators.enabled=true \\
   --set deep-health-check.enabled=false \\
   --set job-auto-restart.enabled=false \\
-  --debug --timeout=10m &&
+  --timeout=10m &&
 echo "=== HyperPod Helm Chart installation completed ==="'`;
     
     await this.executeNonBlocking(installCmd);
@@ -227,13 +227,7 @@ echo "=== HyperPod Helm Chart installation completed ==="'`;
         --force || echo "S3 CSI driver addon already exists"
     
     echo "S3 CSI Driver installation completed"
-    
-    # 安装KubeRay Operator（用于Ray训练，不依赖HyperPod）
-    echo "=== Installing KubeRay Operator ==="
-    helm repo add kuberay https://ray-project.github.io/kuberay-helm/
-    helm repo update
-    helm install kuberay-operator kuberay/kuberay-operator --version 1.2.0 --namespace kube-system || echo "KubeRay Operator already exists"
-    
+        
     echo "EKS general dependencies installation completed"
     '`;
     
@@ -340,7 +334,7 @@ echo "=== HyperPod Helm Chart installation completed ==="'`;
         echo "⚠️  ServiceAccount not found"
     fi
 
-    echo "NLB dependencies installation completed (check warnings above if any)"
+    echo "NLB dependencies installation completed"
     '`;
     
     await this.executeNonBlocking(commands);

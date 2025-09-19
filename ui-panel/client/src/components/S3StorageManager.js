@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Form, Input, Button, Table, Space, message, Modal, Typography, Tag, Row, Col } from 'antd';
+import { Card, Form, Input, Button, Table, Space, message, Modal, Typography, Tag, Row, Col, Alert } from 'antd';
 import { CloudOutlined, DeleteOutlined, CheckCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import globalRefreshManager from '../hooks/useGlobalRefresh';
 
@@ -23,6 +23,19 @@ const S3StorageManager = ({ onStorageChange }) => {
       }
     } catch (error) {
       console.error('Error fetching S3 storage defaults:', error);
+    }
+  };
+
+  // 获取当前AWS region
+  const fetchCurrentRegion = async () => {
+    try {
+      const response = await fetch('/api/aws/current-region');
+      const result = await response.json();
+      if (result.success && result.region) {
+        form.setFieldValue('region', result.region);
+      }
+    } catch (error) {
+      console.error('Error fetching current AWS region:', error);
     }
   };
 
@@ -99,6 +112,7 @@ const S3StorageManager = ({ onStorageChange }) => {
   useEffect(() => {
     fetchStorages();
     fetchDefaults(); // 获取默认值
+    fetchCurrentRegion(); // 获取当前AWS region
     
     // 注册全局刷新监听
     const componentId = 's3-storage-manager';
@@ -174,6 +188,12 @@ const S3StorageManager = ({ onStorageChange }) => {
           }
           size="small"
         >
+          <Alert
+            message='Use "s3-claim" and filled bucket name for first time config.'
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+          />
           <Form
             form={form}
             layout="vertical"
@@ -201,10 +221,21 @@ const S3StorageManager = ({ onStorageChange }) => {
               <Col span={8}>
                 <Form.Item
                   name="region"
-                  label="AWS Region"
+                  label={
+                    <Space>
+                      AWS Region
+                      <Button 
+                        type="text" 
+                        size="small" 
+                        icon={<ReloadOutlined />}
+                        onClick={fetchCurrentRegion}
+                        title="Get current AWS region"
+                      />
+                    </Space>
+                  }
                   rules={[{ required: true, message: 'Please input AWS region' }]}
                 >
-                  <Input placeholder="Default: us-west-2" />
+                  <Input placeholder="Default: us-west-2" disabled />
                 </Form.Item>
               </Col>
             </Row>

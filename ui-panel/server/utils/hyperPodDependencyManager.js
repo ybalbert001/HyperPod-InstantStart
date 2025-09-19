@@ -3,6 +3,54 @@ const fs = require('fs');
 const path = require('path');
 
 class HyperPodDependencyManager {
+
+  /**
+   * 执行非阻塞命令
+   */
+  static async executeNonBlocking(command, options = {}) {
+    return new Promise((resolve, reject) => {
+      // 添加日志头部
+      const logFile = '/app/tmp/hypd-dependency.log';
+      const timestamp = new Date().toISOString();
+      const logHeader = `\n=== ${timestamp} ===\nExecuting: ${command.substring(0, 100)}...\n`;
+      
+      try {
+        fs.appendFileSync(logFile, logHeader);
+      } catch (err) {
+        console.error('Failed to write log header:', err);
+      }
+      
+      const child = spawn('bash', ['-c', `${command} >> ${logFile} 2>&1`], {
+        stdio: 'pipe',
+        ...options
+      });
+      
+      child.on('close', (code) => {
+        const logFooter = `\n--- Command completed with exit code: ${code} ---\n`;
+        try {
+          fs.appendFileSync(logFile, logFooter);
+        } catch (err) {
+          console.error('Failed to write log footer:', err);
+        }
+        
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error(`Command failed with exit code ${code}`));
+        }
+      });
+      
+      child.on('error', (error) => {
+        const errorLog = `\n!!! Command execution error: ${error.message} !!!\n`;
+        try {
+          fs.appendFileSync(logFile, errorLog);
+        } catch (err) {
+          console.error('Failed to write error log:', err);
+        }
+        reject(error);
+      });
+    });
+  }
   
   /**
    * HyperPod集群创建完成后的完整依赖配置流程
@@ -48,7 +96,8 @@ class HyperPodDependencyManager {
     ATTEMPT=0
     
     while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-      STATUS=$(aws sagemaker describe-cluster --cluster-name $HP_CLUSTER_NAME --region $AWS_REGION --query "ClusterStatus" --output text >> /app/tmp/dependency-install.log 2>&1 || echo "NOT_FOUND")
+      STATUS=$(aws sagemaker describe-cluster --cluster-name $HP_CLUSTER_NAME --region $AWS_REGION --query "ClusterStatus" --output text 2>>/app/tmp/dependency-install.log || echo "NOT_FOUND")
+      echo "Checking HyperPod cluster status: $STATUS" >> /app/tmp/dependency-install.log
       
       if [ "$STATUS" = "InService" ]; then
         echo "HyperPod cluster is ready (InService)"
@@ -70,7 +119,8 @@ class HyperPodDependencyManager {
     
     '`;
     
-    execSync(waitCmd, { stdio: 'inherit' });
+    // execSync(waitCmd, { stdio: 'inherit' });
+    await this.executeNonBlocking(waitCmd);
   }
 
   /**
@@ -151,10 +201,17 @@ class HyperPodDependencyManager {
         --region \$AWS_REGION \\
         --resolve-conflicts OVERWRITE || echo "Failed to create HyperPod Training Operator addon"
 
+    # 安装KubeRay Operator（用于Ray训练，不依赖HyperPod）
+    echo "=== Installing KubeRay Operator ==="
+    helm repo add kuberay https://ray-project.github.io/kuberay-helm/
+    helm repo update
+    helm install kuberay-operator kuberay/kuberay-operator --version 1.2.0 --namespace kube-system || echo "KubeRay Operator already exists"
+
     echo "=== All HyperPod dependencies installed successfully ==="
     '`;
     
-    execSync(commands, { stdio: 'inherit' });
+    // execSync(commands, { stdio: 'inherit' });
+    await this.executeNonBlocking(commands);
   }
 
   /**

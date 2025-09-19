@@ -65,7 +65,7 @@ const EnhancedModelManagement = () => {
               tab={
                 <Space>
                   <SettingOutlined />
-                  Storage Config
+                  S3 Mount Config
                 </Space>
               }
               key="storage-config"

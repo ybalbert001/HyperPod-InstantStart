@@ -7,7 +7,7 @@ import EksNodeGroupCreationPanel from './EksNodeGroupCreationPanel';
 
 const { Text } = Typography;
 
-const NodeGroupManager = ({ dependenciesConfigured = false, activeCluster, onDependencyStatusChange, onRefreshClusterDetails }) => {
+const NodeGroupManager = ({ dependenciesConfigured = false, activeCluster, onDependencyStatusChange, onRefreshClusterDetails, refreshTrigger }) => {
   const [loading, setLoading] = useState(false);
   const [scaleLoading, setScaleLoading] = useState(false);
   const [eksNodeGroups, setEksNodeGroups] = useState([]);
@@ -170,6 +170,15 @@ const NodeGroupManager = ({ dependenciesConfigured = false, activeCluster, onDep
       operationRefreshManager.unsubscribe('nodegroup-manager');
     };
   }, []);
+
+  // 响应外部刷新触发器
+  useEffect(() => {
+    if (refreshTrigger > 0) {
+      fetchNodeGroups();
+      fetchClusterInfo();
+      checkHyperPodCreationStatus();
+    }
+  }, [refreshTrigger]);
 
   const renderStatus = (status) => {
     const statusColors = {

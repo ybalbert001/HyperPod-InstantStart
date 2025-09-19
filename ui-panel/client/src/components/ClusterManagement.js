@@ -125,7 +125,7 @@ const DependencyConfigButton = ({ clusterTag, refreshTrigger }) => {
 
   // 响应外部刷新触发
   useEffect(() => {
-    if (refreshTrigger && clusterTag) {
+    if (refreshTrigger > 0 && clusterTag) {
       fetchDependencyStatus();
     }
   }, [refreshTrigger]);
@@ -667,8 +667,13 @@ const ClusterManagement = () => {
         refreshCloudFormationStatus(),
         fetchLogs('launch'),
         fetchLogs('configure'),
-        fetchMLFlowInfo() // 添加 MLFlow 信息获取
+        fetchMLFlowInfo(), // 添加 MLFlow 信息获取
+        fetchClusters(), // 添加集群列表刷新
+        activeCluster ? fetchClusterDetails() : Promise.resolve() // 添加集群详情刷新
       ]);
+      
+      // 触发NodeGroupManager刷新
+      setRefreshTrigger(prev => prev + 1);
       
       if (showSuccessMessage && !isGlobalRefresh) {
         message.success('Status refreshed successfully');
@@ -903,8 +908,11 @@ const ClusterManagement = () => {
                                 <Button 
                                   size="small"
                                   icon={<ReloadOutlined />} 
-                                  onClick={() => {
-                                    fetchClusters();
+                                  onClick={async () => {
+                                    await fetchClusters();
+                                    if (activeCluster) {
+                                      await fetchClusterDetails();
+                                    }
                                     setRefreshTrigger(prev => prev + 1);
                                   }}
                                   loading={clustersLoading}
@@ -1073,6 +1081,7 @@ const ClusterManagement = () => {
                           activeCluster={activeCluster}
                           onDependencyStatusChange={setDependenciesConfigured}
                           onRefreshClusterDetails={fetchClusterDetails}
+                          refreshTrigger={refreshTrigger}
                         />
                       ) : (
                         <Card title="Node Groups" style={{ height: '100%' }}>
