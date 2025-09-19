@@ -178,7 +178,7 @@ class HyperPodDependencyManager {
             --addon-name cert-manager \\
             --region \$AWS_REGION \\
             --query "addon.status" \\
-            --output text >> /app/tmp/dependency-install.log 2>&1 || echo "UNKNOWN")
+            --output text 2>/dev/null || echo "UNKNOWN")
         
         if [ "\$CERT_STATUS" = "ACTIVE" ]; then
             echo "cert-manager is ready (ACTIVE)"
