@@ -6,6 +6,8 @@ LOCAL_IMAGE="ui-panel-dev2"
 
 echo "🐳 Starting Model Deployment UI with Docker (Development Mode)..."
 
+
+
 # 检查 Docker 是否安装
 if ! command -v docker &> /dev/null; then
     echo "❌ Docker is not installed. Please install Docker first."
