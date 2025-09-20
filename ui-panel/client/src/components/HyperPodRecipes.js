@@ -4,12 +4,14 @@ import {
   ExperimentOutlined, 
   RocketOutlined,
   FireOutlined,
-  CodeOutlined
+  CodeOutlined,
+  CloudOutlined
 } from '@ant-design/icons';
 import TrainingConfigPanel from './TrainingConfigPanel';
 import VerlRecipePanel from './VerlRecipePanel';
 import TorchRecipePanel from './TorchRecipePanel';
 import ScriptRecipePanel from './ScriptRecipePanel';
+import SageMakerJobPanel from './SageMakerJobPanel';
 
 const { TabPane } = Tabs;
 
@@ -96,6 +98,21 @@ const HyperPodRecipes = ({ onLaunch, deploymentStatus }) => {
         >
           <div style={{ height: '100%', overflow: 'auto', paddingRight: '8px' }}>
             <VerlRecipePanel onLaunch={onLaunch} deploymentStatus={deploymentStatus} />
+          </div>
+        </TabPane>
+
+        <TabPane
+          tab={
+            <Space>
+              <CloudOutlined />
+              SageMakerJob
+            </Space>
+          }
+          key="sagemaker"
+          style={{ height: '100%', overflow: 'hidden' }}
+        >
+          <div style={{ height: '100%', overflow: 'auto', paddingRight: '8px' }}>
+            <SageMakerJobPanel onLaunch={onLaunch} deploymentStatus={deploymentStatus} />
           </div>
         </TabPane>
       </Tabs>

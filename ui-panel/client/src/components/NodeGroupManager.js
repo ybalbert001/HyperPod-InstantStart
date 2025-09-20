@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Table, Button, message, Tag, Space, Modal, InputNumber, Form, Select, Input, Typography } from 'antd';
+import { Card, Table, Button, message, Tag, Space, Modal, InputNumber, Form, Select, Input, Typography, AutoComplete } from 'antd';
 import { ReloadOutlined, EditOutlined, ToolOutlined, PlusOutlined } from '@ant-design/icons';
 import globalRefreshManager from '../hooks/useGlobalRefresh';
 import operationRefreshManager from '../hooks/useOperationRefresh';
@@ -447,6 +447,7 @@ const NodeGroupManager = ({ dependenciesConfigured = false, activeCluster, onDep
             Create Node Group
           </Button>
         }
+        style={{ display: process.env.REACT_APP_DEMO_EKSNG === 'false' ? 'none' : 'block' }}
       >
         <Table 
           columns={eksColumns}
@@ -551,29 +552,30 @@ const NodeGroupManager = ({ dependenciesConfigured = false, activeCluster, onDep
             initialValue="ml.g5.8xlarge"
             rules={[{ required: true, message: 'Please select or input instance type' }]}
           >
-            <Select 
+            <AutoComplete
               placeholder="Select or type instance type"
-              showSearch
-              allowClear
-              mode="combobox"
-            >
-              <Select.Option value="ml.g5.8xlarge">ml.g5.8xlarge</Select.Option>
-              <Select.Option value="ml.g5.12xlarge">ml.g5.12xlarge</Select.Option>
-              <Select.Option value="ml.g5.24xlarge">ml.g5.24xlarge</Select.Option>
-              <Select.Option value="ml.g5.48xlarge">ml.g5.48xlarge</Select.Option>
-              <Select.Option value="ml.g6.8xlarge">ml.g6.8xlarge</Select.Option>
-              <Select.Option value="ml.g6.12xlarge">ml.g6.12xlarge</Select.Option>
-              <Select.Option value="ml.g6.24xlarge">ml.g6.24xlarge</Select.Option>
-              <Select.Option value="ml.g6.48xlarge">ml.g6.48xlarge</Select.Option>
-              <Select.Option value="ml.g6e.8xlarge">ml.g6e.8xlarge</Select.Option>
-              <Select.Option value="ml.g6e.12xlarge">ml.g6e.12xlarge</Select.Option>
-              <Select.Option value="ml.g6e.24xlarge">ml.g6e.24xlarge</Select.Option>
-              <Select.Option value="ml.g6e.48xlarge">ml.g6e.48xlarge</Select.Option>
-              <Select.Option value="ml.p4d.24xlarge">ml.p4d.24xlarge</Select.Option>
-              <Select.Option value="ml.p5.48xlarge">ml.p5.48xlarge</Select.Option>
-              <Select.Option value="ml.p5en.48xlarge">ml.p5en.48xlarge</Select.Option>
-              <Select.Option value="ml.p6-b200.48xlarge">ml.p6-b200.48xlarge</Select.Option>
-            </Select>
+              options={[
+                { value: 'ml.g5.8xlarge', label: 'ml.g5.8xlarge' },
+                { value: 'ml.g5.12xlarge', label: 'ml.g5.12xlarge' },
+                { value: 'ml.g5.24xlarge', label: 'ml.g5.24xlarge' },
+                { value: 'ml.g5.48xlarge', label: 'ml.g5.48xlarge' },
+                { value: 'ml.g6.8xlarge', label: 'ml.g6.8xlarge' },
+                { value: 'ml.g6.12xlarge', label: 'ml.g6.12xlarge' },
+                { value: 'ml.g6.24xlarge', label: 'ml.g6.24xlarge' },
+                { value: 'ml.g6.48xlarge', label: 'ml.g6.48xlarge' },
+                { value: 'ml.g6e.8xlarge', label: 'ml.g6e.8xlarge' },
+                { value: 'ml.g6e.12xlarge', label: 'ml.g6e.12xlarge' },
+                { value: 'ml.g6e.24xlarge', label: 'ml.g6e.24xlarge' },
+                { value: 'ml.g6e.48xlarge', label: 'ml.g6e.48xlarge' },
+                { value: 'ml.p4d.24xlarge', label: 'ml.p4d.24xlarge' },
+                { value: 'ml.p5.48xlarge', label: 'ml.p5.48xlarge' },
+                { value: 'ml.p5en.48xlarge', label: 'ml.p5en.48xlarge' },
+                { value: 'ml.p6-b200.48xlarge', label: 'ml.p6-b200.48xlarge' }
+              ]}
+              filterOption={(inputValue, option) =>
+                option.value.toLowerCase().indexOf(inputValue.toLowerCase()) !== -1
+              }
+            />
           </Form.Item>
 
           <div style={{ display: 'flex', gap: '16px' }}>

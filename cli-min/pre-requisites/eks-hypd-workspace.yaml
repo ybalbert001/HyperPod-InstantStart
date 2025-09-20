@@ -223,7 +223,7 @@ Resources:
           # Add to fstab for persistent mounting
           echo "CURRENT_BUCKET_$S3_BUCKET_NAME /home/ubuntu/workspace/s3 fuse.s3fs _netdev,iam_role=${EKSPlusHYPDAdminRole},allow_other,uid=1000,gid=1000 0 0" >> /etc/fstab
           
-          sudo -u ubuntu s3fs $S3_BUCKET_NAME /home/ubuntu/workspace/s3 -o iam_role=${EKSPlusHYPDAdminRole}
+          sudo -u ubuntu s3fs $S3_BUCKET_NAME /home/ubuntu/workspace/s3 -o iam_role=${EKSPlusHYPDAdminRole},allow_other,uid=1000,gid=1000
           
           sudo -u ubuntu touch /home/ubuntu/workspace/s3/$S3_BUCKET_NAME
           

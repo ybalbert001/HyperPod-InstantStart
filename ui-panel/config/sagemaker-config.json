@@ -1,0 +1,11 @@
+{
+  "trainingJobName": "minst-1-2g71",
+  "instanceType": "ml.g5.12xlarge",
+  "dockerImage": "763104351884.dkr.ecr.us-west-2.amazonaws.com/pytorch-training:2.8.0-gpu-py312-cu129-ubuntu22.04-sagemaker",
+  "nprocPerNode": 4,
+  "replicas": 2,
+  "smJobDir": "sample-job-1",
+  "entryPythonScriptPath": "codes/launcher.py",
+  "pythonScriptParameters": "--lr 1e-5 \\\n--batch-size 1 --epochs 200",
+  "enableSpotTraining": false
+}
